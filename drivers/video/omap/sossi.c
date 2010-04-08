@@ -23,6 +23,7 @@
 #include <linux/clk.h>
 #include <linux/irq.h>
 #include <linux/io.h>
+#include <linux/interrupt.h>
 
 #include <plat/dma.h>
 

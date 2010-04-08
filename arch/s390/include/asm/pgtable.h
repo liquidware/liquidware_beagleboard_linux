@@ -43,7 +43,7 @@ extern void vmem_map_init(void);
  * The S390 doesn't have any external MMU info: the kernel page
  * tables contain all the necessary information.
  */
-#define update_mmu_cache(vma, address, pte)     do { } while (0)
+#define update_mmu_cache(vma, address, ptep)     do { } while (0)
 
 /*
  * ZERO_PAGE is a global shared page that is always zero: used
@@ -169,12 +169,13 @@ extern unsigned long VMALLOC_START;
  * STL Segment-Table-Length:  Segment-table length (STL+1*16 entries -> up to 2048)
  *
  * A 64 bit pagetable entry of S390 has following format:
- * |                     PFRA                         |0IP0|  OS  |
+ * |			 PFRA			      |0IPC|  OS  |
  * 0000000000111111111122222222223333333333444444444455555555556666
  * 0123456789012345678901234567890123456789012345678901234567890123
  *
  * I Page-Invalid Bit:    Page is not available for address-translation
  * P Page-Protection Bit: Store access not possible for page
+ * C Change-bit override: HW is not required to set change bit
  *
  * A 64 bit segmenttable entry of S390 has following format:
  * |        P-table origin                              |      TT
@@ -218,6 +219,7 @@ extern unsigned long VMALLOC_START;
  */
 
 /* Hardware bits in the page table entry */
+#define _PAGE_CO	0x100		/* HW Change-bit override */
 #define _PAGE_RO	0x200		/* HW read-only bit  */
 #define _PAGE_INVALID	0x400		/* HW invalid bit    */
 

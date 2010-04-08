@@ -417,7 +417,7 @@ static unsigned int calc_reserved(struct gfs2_sbd *sdp)
 	databufhdrs_needed = (sdp->sd_log_commited_databuf +
 			      (dbuf_limit - 1)) / dbuf_limit;
 
-	if (sdp->sd_log_commited_revoke)
+	if (sdp->sd_log_commited_revoke > 0)
 		revokes = gfs2_struct2blk(sdp, sdp->sd_log_commited_revoke,
 					  sizeof(u64));
 
@@ -596,7 +596,9 @@ static void log_write_header(struct gfs2_sbd *sdp, u32 flags, int pull)
 	memset(lh, 0, sizeof(struct gfs2_log_header));
 	lh->lh_header.mh_magic = cpu_to_be32(GFS2_MAGIC);
 	lh->lh_header.mh_type = cpu_to_be32(GFS2_METATYPE_LH);
+	lh->lh_header.__pad0 = cpu_to_be64(0);
 	lh->lh_header.mh_format = cpu_to_be32(GFS2_FORMAT_LH);
+	lh->lh_header.mh_jid = cpu_to_be32(sdp->sd_jdesc->jd_jid);
 	lh->lh_sequence = cpu_to_be64(sdp->sd_log_sequence++);
 	lh->lh_flags = cpu_to_be32(flags);
 	lh->lh_tail = cpu_to_be32(tail);
@@ -788,7 +790,6 @@ static void log_refund(struct gfs2_sbd *sdp, struct gfs2_trans *tr)
 	gfs2_assert_withdraw(sdp, (((int)sdp->sd_log_commited_buf) >= 0) ||
 			     (((int)sdp->sd_log_commited_databuf) >= 0));
 	sdp->sd_log_commited_revoke += tr->tr_num_revoke - tr->tr_num_revoke_rm;
-	gfs2_assert_withdraw(sdp, ((int)sdp->sd_log_commited_revoke) >= 0);
 	reserved = calc_reserved(sdp);
 	gfs2_assert_withdraw(sdp, sdp->sd_log_blks_reserved + tr->tr_reserved >= reserved);
 	unused = sdp->sd_log_blks_reserved - reserved + tr->tr_reserved;

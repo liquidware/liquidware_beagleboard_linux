@@ -105,13 +105,13 @@ bfa_ioim_sm_uninit(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 				bfa_sm_set_state(ioim, bfa_ioim_sm_hcb);
 				list_del(&ioim->qe);
 				list_add_tail(&ioim->qe,
-					&ioim->fcpim->ioim_comp_q);
+						&ioim->fcpim->ioim_comp_q);
 				bfa_cb_queue(ioim->bfa, &ioim->hcb_qe,
 						__bfa_cb_ioim_pathtov, ioim);
 			} else {
 				list_del(&ioim->qe);
 				list_add_tail(&ioim->qe,
-					&ioim->itnim->pending_q);
+						&ioim->itnim->pending_q);
 			}
 			break;
 		}
@@ -149,7 +149,7 @@ bfa_ioim_sm_uninit(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 
@@ -194,7 +194,7 @@ bfa_ioim_sm_sgalloc(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 
@@ -259,7 +259,7 @@ bfa_ioim_sm_active(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 
@@ -317,7 +317,7 @@ bfa_ioim_sm_abort(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 
@@ -377,7 +377,7 @@ bfa_ioim_sm_cleanup(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 
@@ -419,7 +419,7 @@ bfa_ioim_sm_qfull(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 
@@ -467,7 +467,7 @@ bfa_ioim_sm_abort_qfull(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 
@@ -516,7 +516,7 @@ bfa_ioim_sm_cleanup_qfull(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 
@@ -544,7 +544,7 @@ bfa_ioim_sm_hcb(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 
@@ -577,7 +577,7 @@ bfa_ioim_sm_hcb_free(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 
@@ -605,7 +605,7 @@ bfa_ioim_sm_resfree(struct bfa_ioim_s *ioim, enum bfa_ioim_event event)
 		break;
 
 	default:
-		bfa_assert(0);
+		bfa_sm_fault(ioim->bfa, event);
 	}
 }
 

@@ -72,10 +72,6 @@ static void wl1251_rx_status(struct wl1251 *wl,
 	}
 
 	status->signal = desc->rssi;
-	status->qual = (desc->rssi - WL1251_RX_MIN_RSSI) * 100 /
-		(WL1251_RX_MAX_RSSI - WL1251_RX_MIN_RSSI);
-	status->qual = min(status->qual, 100);
-	status->qual = max(status->qual, 0);
 
 	/*
 	 * FIXME: guessing that snr needs to be divided by two, otherwise
@@ -130,7 +126,7 @@ static void wl1251_rx_body(struct wl1251 *wl,
 	if (wl->rx_current_buffer)
 		rx_packet_ring_addr += wl->data_path->rx_packet_ring_chunk_size;
 
-	skb = dev_alloc_skb(length);
+	skb = __dev_alloc_skb(length, GFP_KERNEL);
 	if (!skb) {
 		wl1251_error("Couldn't allocate RX frame");
 		return;
@@ -153,7 +149,7 @@ static void wl1251_rx_body(struct wl1251 *wl,
 		     beacon ? "beacon" : "");
 
 	memcpy(IEEE80211_SKB_RXCB(skb), &status, sizeof(status));
-	ieee80211_rx(wl->hw, skb);
+	ieee80211_rx_ni(wl->hw, skb);
 }
 
 static void wl1251_rx_ack(struct wl1251 *wl)

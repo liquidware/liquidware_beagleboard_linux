@@ -39,6 +39,7 @@ enum {
 
 	/* module saa7115: reserved range 101-149 */
 	V4L2_IDENT_SAA7111 = 101,
+	V4L2_IDENT_SAA7111A = 102,
 	V4L2_IDENT_SAA7113 = 103,
 	V4L2_IDENT_SAA7114 = 104,
 	V4L2_IDENT_SAA7115 = 105,
@@ -73,6 +74,7 @@ enum {
 	V4L2_IDENT_CX23418_843 = 403, /* Integrated A/V Decoder on the '418 */
 	V4L2_IDENT_CX23415 = 415,
 	V4L2_IDENT_CX23416 = 416,
+	V4L2_IDENT_CX23417 = 417,
 	V4L2_IDENT_CX23418 = 418,
 
 	/* module au0828 */
@@ -130,6 +132,12 @@ enum {
 	V4L2_IDENT_SAA6752HS = 6752,
 	V4L2_IDENT_SAA6752HS_AC3 = 6753,
 
+	/* modules tef6862: just ident 6862 */
+	V4L2_IDENT_TEF6862 = 6862,
+
+	/* module tvp7002: just ident 7002 */
+	V4L2_IDENT_TVP7002 = 7002,
+
 	/* module adv7170: just ident 7170 */
 	V4L2_IDENT_ADV7170 = 7170,
 
@@ -151,6 +159,9 @@ enum {
 	/* module adv7343: just ident 7343 */
 	V4L2_IDENT_ADV7343 = 7343,
 
+	/* module saa7706h: just ident 7706 */
+	V4L2_IDENT_SAA7706H = 7706,
+
 	/* module wm8739: just ident 8739 */
 	V4L2_IDENT_WM8739 = 8739,
 
@@ -166,11 +177,26 @@ enum {
 	/* module mt9v011, just ident 8243 */
 	V4L2_IDENT_MT9V011 = 8243,
 
+	/* module cx23885 and cx25840 */
+	V4L2_IDENT_CX23885    = 8850,
+	V4L2_IDENT_CX23885_AV = 8851, /* Integrated A/V decoder */
+	V4L2_IDENT_CX23887    = 8870,
+	V4L2_IDENT_CX23887_AV = 8871, /* Integrated A/V decoder */
+	V4L2_IDENT_CX23888    = 8880,
+	V4L2_IDENT_CX23888_AV = 8881, /* Integrated A/V decoder */
+	V4L2_IDENT_CX23888_IR = 8882, /* Integrated infrared controller */
+
 	/* module tw9910: just ident 9910 */
 	V4L2_IDENT_TW9910 = 9910,
 
 	/* module sn9c20x: just ident 10000 */
 	V4L2_IDENT_SN9C20X = 10000,
+
+	/* module cx231xx and cx25840 */
+	V4L2_IDENT_CX2310X_AV = 23099, /* Integrated A/V decoder; not in '100 */
+	V4L2_IDENT_CX23100    = 23100,
+	V4L2_IDENT_CX23101    = 23101,
+	V4L2_IDENT_CX23102    = 23102,
 
 	/* module msp3400: reserved range 34000-34999 and 44000-44999 */
 	V4L2_IDENT_MSPX4XX  = 34000, /* generic MSPX4XX identifier, only
@@ -248,6 +274,8 @@ enum {
 	V4L2_IDENT_MT9V022IX7ATC	= 45010, /* No way to detect "normal" I77ATx */
 	V4L2_IDENT_MT9V022IX7ATM	= 45015, /* and "lead free" IA7ATx chips */
 	V4L2_IDENT_MT9T031		= 45020,
+	V4L2_IDENT_MT9T111		= 45021,
+	V4L2_IDENT_MT9T112		= 45022,
 	V4L2_IDENT_MT9V111		= 45031,
 	V4L2_IDENT_MT9V112		= 45032,
 
@@ -265,6 +293,9 @@ enum {
 
 	/* module m52790: just ident 52790 */
 	V4L2_IDENT_M52790 = 52790,
+
+	/* Sharp RJ54N1CB0C, 0xCB0C = 51980 */
+	V4L2_IDENT_RJ54N1CB0C = 51980,
 };
 
 #endif

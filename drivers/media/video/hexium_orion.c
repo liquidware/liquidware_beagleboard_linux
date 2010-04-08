@@ -216,6 +216,10 @@ static int hexium_probe(struct saa7146_dev *dev)
 		return -EFAULT;
 	}
 
+	err = saa7146_vv_devinit(dev);
+	if (err)
+		return err;
+
 	hexium = kzalloc(sizeof(struct hexium), GFP_KERNEL);
 	if (NULL == hexium) {
 		printk("hexium_orion: hexium_probe: not enough kernel memory.\n");
@@ -350,7 +354,7 @@ static int vidioc_s_input(struct file *file, void *fh, unsigned int input)
 	struct saa7146_dev *dev = ((struct saa7146_fh *)fh)->dev;
 	struct hexium *hexium = (struct hexium *) dev->ext_priv;
 
-	if (input < 0 || input >= HEXIUM_INPUTS)
+	if (input >= HEXIUM_INPUTS)
 		return -EINVAL;
 
 	hexium->cur_input = input;

@@ -5,8 +5,7 @@
 #include <linux/ktime.h>
 #include <net/sch_generic.h>
 
-struct qdisc_walker
-{
+struct qdisc_walker {
 	int	stop;
 	int	skip;
 	int	count;
@@ -72,6 +71,7 @@ extern void qdisc_watchdog_cancel(struct qdisc_watchdog *wd);
 
 extern struct Qdisc_ops pfifo_qdisc_ops;
 extern struct Qdisc_ops bfifo_qdisc_ops;
+extern struct Qdisc_ops pfifo_head_drop_qdisc_ops;
 
 extern int fifo_set_limit(struct Qdisc *q, unsigned int limit);
 extern struct Qdisc *fifo_create_dflt(struct Qdisc *sch, struct Qdisc_ops *ops,

@@ -33,6 +33,8 @@
 #define LG_NOGET		0x100
 #define LG_FF			0x200
 #define LG_FF2			0x400
+#define LG_RDESC_REL_ABS	0x800
+#define LG_FF3			0x1000
 
 /*
  * Certain Logitech keyboards send in report #3 keys which are far
@@ -50,6 +52,13 @@ static void lg_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 				"descriptor\n");
 		rdesc[84] = rdesc[89] = 0x4d;
 		rdesc[85] = rdesc[90] = 0x10;
+	}
+	if ((quirks & LG_RDESC_REL_ABS) && rsize >= 50 &&
+			rdesc[32] == 0x81 && rdesc[33] == 0x06 &&
+			rdesc[49] == 0x81 && rdesc[50] == 0x06) {
+		dev_info(&hdev->dev, "fixing up rel/abs in Logitech "
+				"report descriptor\n");
+		rdesc[33] = rdesc[50] = 0x02;
 	}
 }
 
@@ -85,6 +94,22 @@ static int lg_ultrax_remote_mapping(struct hid_input *hi,
 
 	default:
 		return 0;
+	}
+	return 1;
+}
+
+static int lg_dinovo_mapping(struct hid_input *hi, struct hid_usage *usage,
+		unsigned long **bit, int *max)
+{
+	if ((usage->hid & HID_USAGE_PAGE) != HID_UP_LOGIVENDOR)
+		return 0;
+
+	switch (usage->hid & HID_USAGE) {
+
+	case 0x00d: lg_map_key_clear(KEY_MEDIA);	break;
+	default:
+		return 0;
+
 	}
 	return 1;
 }
@@ -164,6 +189,10 @@ static int lg_input_mapping(struct hid_device *hdev, struct hid_input *hi,
 			lg_ultrax_remote_mapping(hi, usage, bit, max))
 		return 1;
 
+	if (hdev->product == USB_DEVICE_ID_DINOVO_MINI &&
+			lg_dinovo_mapping(hi, usage, bit, max))
+		return 1;
+
 	if ((quirks & LG_WIRELESS) && lg_wireless_mapping(hi, usage, bit, max))
 		return 1;
 
@@ -238,7 +267,7 @@ static int lg_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		goto err_free;
 	}
 
-	if (quirks & (LG_FF | LG_FF2))
+	if (quirks & (LG_FF | LG_FF2 | LG_FF3))
 		connect_mask &= ~HID_CONNECT_FF;
 
 	ret = hid_hw_start(hdev, connect_mask);
@@ -251,6 +280,8 @@ static int lg_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		lgff_init(hdev);
 	if (quirks & LG_FF2)
 		lg2ff_init(hdev);
+	if (quirks & LG_FF3)
+		lg3ff_init(hdev);
 
 	return 0;
 err_free:
@@ -303,8 +334,15 @@ static const struct hid_device_id lg_devices[] = {
 		.driver_data = LG_FF },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, USB_DEVICE_ID_LOGITECH_RUMBLEPAD2),
 		.driver_data = LG_FF2 },
+	{ HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, USB_DEVICE_ID_LOGITECH_FLIGHT_SYSTEM_G940),
+		.driver_data = LG_FF3 },
+	{ HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, USB_DEVICE_ID_SPACENAVIGATOR),
+		.driver_data = LG_RDESC_REL_ABS },
+	{ HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, USB_DEVICE_ID_SPACETRAVELLER),
+		.driver_data = LG_RDESC_REL_ABS },
 	{ }
 };
+
 MODULE_DEVICE_TABLE(hid, lg_devices);
 
 static struct hid_driver lg_driver = {

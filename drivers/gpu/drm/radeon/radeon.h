@@ -28,8 +28,6 @@
 #ifndef __RADEON_H__
 #define __RADEON_H__
 
-#include "radeon_object.h"
-
 /* TODO: Here are things that needs to be done :
  *	- surface allocator & initializer : (bit like scratch reg) should
  *	  initialize HDP_ stuff on RS600, R600, R700 hw, well anythings
@@ -67,6 +65,11 @@
 #include <linux/list.h>
 #include <linux/kref.h>
 
+#include <ttm/ttm_bo_api.h>
+#include <ttm/ttm_bo_driver.h>
+#include <ttm/ttm_placement.h>
+#include <ttm/ttm_module.h>
+
 #include "radeon_family.h"
 #include "radeon_mode.h"
 #include "radeon_reg.h"
@@ -85,12 +88,16 @@ extern int radeon_benchmarking;
 extern int radeon_testing;
 extern int radeon_connector_table;
 extern int radeon_tv;
+extern int radeon_new_pll;
+extern int radeon_dynpm;
+extern int radeon_audio;
 
 /*
  * Copy from radeon_drv.h so we don't have to include both and have conflicting
  * symbol;
  */
 #define RADEON_MAX_USEC_TIMEOUT		100000	/* 100 ms */
+/* RADEON_IB_POOL_SIZE must be a power of 2 */
 #define RADEON_IB_POOL_SIZE		16
 #define RADEON_DEBUGFS_MAX_NUM_FILES	32
 #define RADEONFB_CONN_LIMIT		4
@@ -112,6 +119,21 @@ struct radeon_device;
 /*
  * BIOS.
  */
+#define ATRM_BIOS_PAGE 4096
+
+#if defined(CONFIG_VGA_SWITCHEROO)
+bool radeon_atrm_supported(struct pci_dev *pdev);
+int radeon_atrm_get_bios_chunk(uint8_t *bios, int offset, int len);
+#else
+static inline bool radeon_atrm_supported(struct pci_dev *pdev)
+{
+	return false;
+}
+
+static inline int radeon_atrm_get_bios_chunk(uint8_t *bios, int offset, int len){
+	return -EINVAL;
+}
+#endif
 bool radeon_get_bios(struct radeon_device *rdev);
 
 
@@ -132,17 +154,23 @@ void radeon_dummy_page_fini(struct radeon_device *rdev);
 struct radeon_clock {
 	struct radeon_pll p1pll;
 	struct radeon_pll p2pll;
+	struct radeon_pll dcpll;
 	struct radeon_pll spll;
 	struct radeon_pll mpll;
 	/* 10 Khz units */
 	uint32_t default_mclk;
 	uint32_t default_sclk;
+	uint32_t default_dispclk;
+	uint32_t dp_extclk;
 };
 
 /*
  * Power management
  */
 int radeon_pm_init(struct radeon_device *rdev);
+void radeon_pm_compute_clocks(struct radeon_device *rdev);
+void radeon_combios_get_power_modes(struct radeon_device *rdev);
+void radeon_atombios_get_power_modes(struct radeon_device *rdev);
 
 /*
  * Fences.
@@ -157,6 +185,7 @@ struct radeon_fence_driver {
 	struct list_head		created;
 	struct list_head		emited;
 	struct list_head		signaled;
+	bool				initialized;
 };
 
 struct radeon_fence {
@@ -186,76 +215,63 @@ void radeon_fence_unref(struct radeon_fence **fence);
  * Tiling registers
  */
 struct radeon_surface_reg {
-	struct radeon_object *robj;
+	struct radeon_bo *bo;
 };
 
 #define RADEON_GEM_MAX_SURFACES 8
 
 /*
- * Radeon buffer.
+ * TTM.
  */
-struct radeon_object;
+struct radeon_mman {
+	struct ttm_bo_global_ref        bo_global_ref;
+	struct ttm_global_reference	mem_global_ref;
+	struct ttm_bo_device		bdev;
+	bool				mem_global_referenced;
+	bool				initialized;
+};
 
-struct radeon_object_list {
+struct radeon_bo {
+	/* Protected by gem.mutex */
+	struct list_head		list;
+	/* Protected by tbo.reserved */
+	u32				placements[3];
+	struct ttm_placement		placement;
+	struct ttm_buffer_object	tbo;
+	struct ttm_bo_kmap_obj		kmap;
+	unsigned			pin_count;
+	void				*kptr;
+	u32				tiling_flags;
+	u32				pitch;
+	int				surface_reg;
+	/* Constant after initialization */
+	struct radeon_device		*rdev;
+	struct drm_gem_object		*gobj;
+};
+
+struct radeon_bo_list {
 	struct list_head	list;
-	struct radeon_object	*robj;
+	struct radeon_bo	*bo;
 	uint64_t		gpu_offset;
 	unsigned		rdomain;
 	unsigned		wdomain;
-	uint32_t                tiling_flags;
+	u32			tiling_flags;
 };
 
-int radeon_object_init(struct radeon_device *rdev);
-void radeon_object_fini(struct radeon_device *rdev);
-int radeon_object_create(struct radeon_device *rdev,
-			 struct drm_gem_object *gobj,
-			 unsigned long size,
-			 bool kernel,
-			 uint32_t domain,
-			 bool interruptible,
-			 struct radeon_object **robj_ptr);
-int radeon_object_kmap(struct radeon_object *robj, void **ptr);
-void radeon_object_kunmap(struct radeon_object *robj);
-void radeon_object_unref(struct radeon_object **robj);
-int radeon_object_pin(struct radeon_object *robj, uint32_t domain,
-		      uint64_t *gpu_addr);
-void radeon_object_unpin(struct radeon_object *robj);
-int radeon_object_wait(struct radeon_object *robj);
-int radeon_object_busy_domain(struct radeon_object *robj, uint32_t *cur_placement);
-int radeon_object_evict_vram(struct radeon_device *rdev);
-int radeon_object_mmap(struct radeon_object *robj, uint64_t *offset);
-void radeon_object_force_delete(struct radeon_device *rdev);
-void radeon_object_list_add_object(struct radeon_object_list *lobj,
-				   struct list_head *head);
-int radeon_object_list_validate(struct list_head *head, void *fence);
-void radeon_object_list_unvalidate(struct list_head *head);
-void radeon_object_list_clean(struct list_head *head);
-int radeon_object_fbdev_mmap(struct radeon_object *robj,
-			     struct vm_area_struct *vma);
-unsigned long radeon_object_size(struct radeon_object *robj);
-void radeon_object_clear_surface_reg(struct radeon_object *robj);
-int radeon_object_check_tiling(struct radeon_object *robj, bool has_moved,
-			       bool force_drop);
-void radeon_object_set_tiling_flags(struct radeon_object *robj,
-				    uint32_t tiling_flags, uint32_t pitch);
-void radeon_object_get_tiling_flags(struct radeon_object *robj, uint32_t *tiling_flags, uint32_t *pitch);
-void radeon_bo_move_notify(struct ttm_buffer_object *bo,
-			   struct ttm_mem_reg *mem);
-void radeon_bo_fault_reserve_notify(struct ttm_buffer_object *bo);
 /*
  * GEM objects.
  */
 struct radeon_gem {
+	struct mutex		mutex;
 	struct list_head	objects;
 };
 
 int radeon_gem_init(struct radeon_device *rdev);
 void radeon_gem_fini(struct radeon_device *rdev);
 int radeon_gem_object_create(struct radeon_device *rdev, int size,
-			     int alignment, int initial_domain,
-			     bool discardable, bool kernel,
-			     bool interruptible,
-			     struct drm_gem_object **obj);
+				int alignment, int initial_domain,
+				bool discardable, bool kernel,
+				struct drm_gem_object **obj);
 int radeon_gem_object_pin(struct drm_gem_object *obj, uint32_t pin_domain,
 			  uint64_t *gpu_addr);
 void radeon_gem_object_unpin(struct drm_gem_object *obj);
@@ -271,7 +287,7 @@ struct radeon_gart_table_ram {
 };
 
 struct radeon_gart_table_vram {
-	struct radeon_object		*robj;
+	struct radeon_bo		*robj;
 	volatile uint32_t		*ptr;
 };
 
@@ -281,6 +297,7 @@ union radeon_gart_table {
 };
 
 #define RADEON_GPU_PAGE_SIZE 4096
+#define RADEON_GPU_PAGE_MASK (RADEON_GPU_PAGE_SIZE - 1)
 
 struct radeon_gart {
 	dma_addr_t			table_addr;
@@ -315,21 +332,21 @@ struct radeon_mc {
 	/* for some chips with <= 32MB we need to lie
 	 * about vram size near mc fb location */
 	u64			mc_vram_size;
-	u64			gtt_location;
+	u64			visible_vram_size;
 	u64			gtt_size;
 	u64			gtt_start;
 	u64			gtt_end;
-	u64			vram_location;
 	u64			vram_start;
 	u64			vram_end;
 	unsigned		vram_width;
 	u64			real_vram_size;
 	int			vram_mtrr;
 	bool			vram_is_ddr;
+	bool			igp_sideport_enabled;
 };
 
-int radeon_mc_setup(struct radeon_device *rdev);
-
+bool radeon_combios_sideport_present(struct radeon_device *rdev);
+bool radeon_atombios_sideport_present(struct radeon_device *rdev);
 
 /*
  * GPU scratch registers structures, functions & helpers
@@ -352,22 +369,29 @@ struct radeon_irq {
 	bool		sw_int;
 	/* FIXME: use a define max crtc rather than hardcode it */
 	bool		crtc_vblank_int[2];
+	wait_queue_head_t	vblank_queue;
+	/* FIXME: use defines for max hpd/dacs */
+	bool            hpd[6];
+	spinlock_t sw_lock;
+	int sw_refcount;
 };
 
 int radeon_irq_kms_init(struct radeon_device *rdev);
 void radeon_irq_kms_fini(struct radeon_device *rdev);
-
+void radeon_irq_kms_sw_irq_get(struct radeon_device *rdev);
+void radeon_irq_kms_sw_irq_put(struct radeon_device *rdev);
 
 /*
  * CP & ring.
  */
 struct radeon_ib {
 	struct list_head	list;
-	unsigned long		idx;
+	unsigned		idx;
 	uint64_t		gpu_addr;
 	struct radeon_fence	*fence;
-	uint32_t	*ptr;
+	uint32_t		*ptr;
 	uint32_t		length_dw;
+	bool			free;
 };
 
 /*
@@ -376,15 +400,15 @@ struct radeon_ib {
  */
 struct radeon_ib_pool {
 	struct mutex		mutex;
-	struct radeon_object	*robj;
-	struct list_head	scheduled_ibs;
+	struct radeon_bo	*robj;
+	struct list_head	bogus_ib;
 	struct radeon_ib	ibs[RADEON_IB_POOL_SIZE];
 	bool			ready;
-	DECLARE_BITMAP(alloc_bm, RADEON_IB_POOL_SIZE);
+	unsigned		head_id;
 };
 
 struct radeon_cp {
-	struct radeon_object	*ring_obj;
+	struct radeon_bo	*ring_obj;
 	volatile uint32_t	*ring;
 	unsigned		rptr;
 	unsigned		wptr;
@@ -399,8 +423,25 @@ struct radeon_cp {
 	bool			ready;
 };
 
+/*
+ * R6xx+ IH ring
+ */
+struct r600_ih {
+	struct radeon_bo	*ring_obj;
+	volatile uint32_t	*ring;
+	unsigned		rptr;
+	unsigned		wptr;
+	unsigned		wptr_old;
+	unsigned		ring_size;
+	uint64_t		gpu_addr;
+	uint32_t		ptr_mask;
+	spinlock_t              lock;
+	bool                    enabled;
+};
+
 struct r600_blit {
-	struct radeon_object	*shader_obj;
+	struct mutex		mutex;
+	struct radeon_bo	*shader_obj;
 	u64 shader_gpu_addr;
 	u32 vs_offset, ps_offset;
 	u32 state_offset;
@@ -415,6 +456,7 @@ int radeon_ib_schedule(struct radeon_device *rdev, struct radeon_ib *ib);
 int radeon_ib_pool_init(struct radeon_device *rdev);
 void radeon_ib_pool_fini(struct radeon_device *rdev);
 int radeon_ib_test(struct radeon_device *rdev);
+extern void radeon_ib_bogus_add(struct radeon_device *rdev, struct radeon_ib *ib);
 /* Ring access between begin & end cannot sleep */
 void radeon_ring_free_size(struct radeon_device *rdev);
 int radeon_ring_lock(struct radeon_device *rdev, unsigned ndw);
@@ -430,8 +472,8 @@ void radeon_ring_fini(struct radeon_device *rdev);
  */
 struct radeon_cs_reloc {
 	struct drm_gem_object		*gobj;
-	struct radeon_object		*robj;
-	struct radeon_object_list	lobj;
+	struct radeon_bo		*robj;
+	struct radeon_bo_list		lobj;
 	uint32_t			handle;
 	uint32_t			flags;
 };
@@ -448,6 +490,7 @@ struct radeon_cs_chunk {
 };
 
 struct radeon_cs_parser {
+	struct device		*dev;
 	struct radeon_device	*rdev;
 	struct drm_file		*filp;
 	/* chunks */
@@ -527,7 +570,7 @@ void radeon_agp_fini(struct radeon_device *rdev);
  * Writeback
  */
 struct radeon_wb {
-	struct radeon_object	*wb_obj;
+	struct radeon_bo	*wb_obj;
 	volatile uint32_t	*wb;
 	uint64_t		gpu_addr;
 };
@@ -551,7 +594,99 @@ struct radeon_wb {
  * Equation between gpu/memory clock and available bandwidth is hw dependent
  * (type of memory, bus size, efficiency, ...)
  */
+enum radeon_pm_state {
+	PM_STATE_DISABLED,
+	PM_STATE_MINIMUM,
+	PM_STATE_PAUSED,
+	PM_STATE_ACTIVE
+};
+enum radeon_pm_action {
+	PM_ACTION_NONE,
+	PM_ACTION_MINIMUM,
+	PM_ACTION_DOWNCLOCK,
+	PM_ACTION_UPCLOCK
+};
+
+enum radeon_voltage_type {
+	VOLTAGE_NONE = 0,
+	VOLTAGE_GPIO,
+	VOLTAGE_VDDC,
+	VOLTAGE_SW
+};
+
+enum radeon_pm_state_type {
+	POWER_STATE_TYPE_DEFAULT,
+	POWER_STATE_TYPE_POWERSAVE,
+	POWER_STATE_TYPE_BATTERY,
+	POWER_STATE_TYPE_BALANCED,
+	POWER_STATE_TYPE_PERFORMANCE,
+};
+
+enum radeon_pm_clock_mode_type {
+	POWER_MODE_TYPE_DEFAULT,
+	POWER_MODE_TYPE_LOW,
+	POWER_MODE_TYPE_MID,
+	POWER_MODE_TYPE_HIGH,
+};
+
+struct radeon_voltage {
+	enum radeon_voltage_type type;
+	/* gpio voltage */
+	struct radeon_gpio_rec gpio;
+	u32 delay; /* delay in usec from voltage drop to sclk change */
+	bool active_high; /* voltage drop is active when bit is high */
+	/* VDDC voltage */
+	u8 vddc_id; /* index into vddc voltage table */
+	u8 vddci_id; /* index into vddci voltage table */
+	bool vddci_enabled;
+	/* r6xx+ sw */
+	u32 voltage;
+};
+
+struct radeon_pm_non_clock_info {
+	/* pcie lanes */
+	int pcie_lanes;
+	/* standardized non-clock flags */
+	u32 flags;
+};
+
+struct radeon_pm_clock_info {
+	/* memory clock */
+	u32 mclk;
+	/* engine clock */
+	u32 sclk;
+	/* voltage info */
+	struct radeon_voltage voltage;
+	/* standardized clock flags - not sure we'll need these */
+	u32 flags;
+};
+
+struct radeon_power_state {
+	enum radeon_pm_state_type type;
+	/* XXX: use a define for num clock modes */
+	struct radeon_pm_clock_info clock_info[8];
+	/* number of valid clock modes in this power state */
+	int num_clock_modes;
+	struct radeon_pm_clock_info *default_clock_mode;
+	/* non clock info about this state */
+	struct radeon_pm_non_clock_info non_clock_info;
+	bool voltage_drop_active;
+};
+
+/*
+ * Some modes are overclocked by very low value, accept them
+ */
+#define RADEON_MODE_OVERCLOCK_MARGIN 500 /* 5 MHz */
+
 struct radeon_pm {
+	struct mutex		mutex;
+	struct delayed_work	idle_work;
+	enum radeon_pm_state	state;
+	enum radeon_pm_action	planned_action;
+	unsigned long		action_timeout;
+	bool 			downclocked;
+	int			active_crtcs;
+	int			req_vblank;
 	fixed20_12		max_bandwidth;
 	fixed20_12		igp_sideport_mclk;
 	fixed20_12		igp_system_mclk;
@@ -563,6 +698,15 @@ struct radeon_pm {
 	fixed20_12		core_bandwidth;
 	fixed20_12		sclk;
 	fixed20_12		needed_bandwidth;
+	/* XXX: use a define for num power modes */
+	struct radeon_power_state power_state[8];
+	/* number of valid power states */
+	int                     num_power_states;
+	struct radeon_power_state *current_power_state;
+	struct radeon_pm_clock_info *current_clock_mode;
+	struct radeon_power_state *requested_power_state;
+	struct radeon_pm_clock_info *requested_clock_mode;
+	struct radeon_power_state *default_power_state;
 };
 
 
@@ -632,6 +776,7 @@ struct radeon_asic {
 	void (*set_engine_clock)(struct radeon_device *rdev, uint32_t eng_clock);
 	uint32_t (*get_memory_clock)(struct radeon_device *rdev);
 	void (*set_memory_clock)(struct radeon_device *rdev, uint32_t mem_clock);
+	int (*get_pcie_lanes)(struct radeon_device *rdev);
 	void (*set_pcie_lanes)(struct radeon_device *rdev, int lanes);
 	void (*set_clock_gating)(struct radeon_device *rdev, int enable);
 	int (*set_surface_reg)(struct radeon_device *rdev, int reg,
@@ -639,6 +784,17 @@ struct radeon_asic {
 			       uint32_t offset, uint32_t obj_size);
 	int (*clear_surface_reg)(struct radeon_device *rdev, int reg);
 	void (*bandwidth_update)(struct radeon_device *rdev);
+	void (*hpd_init)(struct radeon_device *rdev);
+	void (*hpd_fini)(struct radeon_device *rdev);
+	bool (*hpd_sense)(struct radeon_device *rdev, enum radeon_hpd_id hpd);
+	void (*hpd_set_polarity)(struct radeon_device *rdev, enum radeon_hpd_id hpd);
+	/* ioctl hw specific callback. Some hw might want to perform special
+	 * operation on specific ioctl. For instance on wait idle some hw
+	 * might want to perform and HDP flush through MMIO as it seems that
+	 * some R6XX/R7XX hw doesn't take HDP flush into account if programmed
+	 * through ring.
+	 */
+	void (*ioctl_wait_idle)(struct radeon_device *rdev, struct radeon_bo *bo);
 };
 
 /*
@@ -647,11 +803,14 @@ struct radeon_asic {
 struct r100_asic {
 	const unsigned	*reg_safe_bm;
 	unsigned	reg_safe_bm_size;
+	u32		hdp_cntl;
 };
 
 struct r300_asic {
 	const unsigned	*reg_safe_bm;
 	unsigned	reg_safe_bm_size;
+	u32		resync_scratch;
+	u32		hdp_cntl;
 };
 
 struct r600_asic {
@@ -668,6 +827,9 @@ struct r600_asic {
 	unsigned sx_max_export_pos_size;
 	unsigned sx_max_export_smx_size;
 	unsigned sq_num_cf_insts;
+	unsigned tiling_nbanks;
+	unsigned tiling_npipes;
+	unsigned tiling_group_size;
 };
 
 struct rv770_asic {
@@ -688,6 +850,9 @@ struct rv770_asic {
 	unsigned sc_prim_fifo_size;
 	unsigned sc_hiz_tile_fifo_size;
 	unsigned sc_earlyz_tile_fifo_fize;
+	unsigned tiling_nbanks;
+	unsigned tiling_npipes;
+	unsigned tiling_group_size;
 };
 
 union radeon_asic_config {
@@ -751,9 +916,9 @@ struct radeon_device {
 	uint8_t				*bios;
 	bool				is_atom_bios;
 	uint16_t			bios_header_start;
-	struct radeon_object		*stollen_vga_memory;
+	struct radeon_bo		*stollen_vga_memory;
 	struct fb_info			*fbdev_info;
-	struct radeon_object		*fbdev_robj;
+	struct radeon_bo		*fbdev_rbo;
 	struct radeon_framebuffer	*fbdev_rfb;
 	/* Register mmio */
 	resource_size_t			rmmio_base;
@@ -791,8 +956,24 @@ struct radeon_device {
 	struct radeon_surface_reg surface_regs[RADEON_GEM_MAX_SURFACES];
 	const struct firmware *me_fw;	/* all family ME firmware */
 	const struct firmware *pfp_fw;	/* r6/700 PFP firmware */
+	const struct firmware *rlc_fw;	/* r6/700 RLC firmware */
 	struct r600_blit r600_blit;
 	int msi_enabled; /* msi enabled */
+	struct r600_ih ih; /* r6/700 interrupt ring */
+	struct workqueue_struct *wq;
+	struct work_struct hotplug_work;
+	int num_crtc; /* number of crtcs */
+	struct mutex dc_hw_i2c_mutex; /* display controller hw i2c mutex */
+
+	/* audio stuff */
+	struct timer_list	audio_timer;
+	int			audio_channels;
+	int			audio_rate;
+	int			audio_bits_per_sample;
+	uint8_t			audio_status_bits;
+	uint8_t			audio_category_code;
+
+	bool powered_down;
 };
 
 int radeon_device_init(struct radeon_device *rdev,
@@ -811,7 +992,7 @@ void r600_kms_blit_copy(struct radeon_device *rdev,
 
 static inline uint32_t r100_mm_rreg(struct radeon_device *rdev, uint32_t reg)
 {
-	if (reg < 0x10000)
+	if (reg < rdev->rmmio_size)
 		return readl(((void __iomem *)rdev->rmmio) + reg);
 	else {
 		writel(reg, ((void __iomem *)rdev->rmmio) + RADEON_MM_INDEX);
@@ -821,7 +1002,7 @@ static inline uint32_t r100_mm_rreg(struct radeon_device *rdev, uint32_t reg)
 
 static inline void r100_mm_wreg(struct radeon_device *rdev, uint32_t reg, uint32_t v)
 {
-	if (reg < 0x10000)
+	if (reg < rdev->rmmio_size)
 		writel(v, ((void __iomem *)rdev->rmmio) + reg);
 	else {
 		writel(reg, ((void __iomem *)rdev->rmmio) + RADEON_MM_INDEX);
@@ -829,6 +1010,10 @@ static inline void r100_mm_wreg(struct radeon_device *rdev, uint32_t reg, uint32
 	}
 }
 
+/*
+ * Cast helper
+ */
+#define to_radeon_fence(p) ((struct radeon_fence *)(p))
 
 /*
  * Registers read & write functions.
@@ -846,6 +1031,8 @@ static inline void r100_mm_wreg(struct radeon_device *rdev, uint32_t reg, uint32
 #define WREG32_MC(reg, v) rdev->mc_wreg(rdev, (reg), (v))
 #define RREG32_PCIE(reg) rv370_pcie_rreg(rdev, (reg))
 #define WREG32_PCIE(reg, v) rv370_pcie_wreg(rdev, (reg), (v))
+#define RREG32_PCIE_P(reg) rdev->pciep_rreg(rdev, (reg))
+#define WREG32_PCIE_P(reg, v) rdev->pciep_wreg(rdev, (reg), (v))
 #define WREG32_P(reg, val, mask)				\
 	do {							\
 		uint32_t tmp_ = RREG32(reg);			\
@@ -907,7 +1094,7 @@ void r100_pll_errata_after_index(struct radeon_device *rdev);
 #define ASIC_IS_AVIVO(rdev) ((rdev->family >= CHIP_RS600))
 #define ASIC_IS_DCE3(rdev) ((rdev->family >= CHIP_RV620))
 #define ASIC_IS_DCE32(rdev) ((rdev->family >= CHIP_RV730))
-
+#define ASIC_IS_DCE4(rdev) ((rdev->family >= CHIP_CEDAR))
 
 /*
  * BIOS helpers.
@@ -965,18 +1152,27 @@ static inline void radeon_ring_write(struct radeon_device *rdev, uint32_t v)
 #define radeon_get_engine_clock(rdev) (rdev)->asic->get_engine_clock((rdev))
 #define radeon_set_engine_clock(rdev, e) (rdev)->asic->set_engine_clock((rdev), (e))
 #define radeon_get_memory_clock(rdev) (rdev)->asic->get_memory_clock((rdev))
-#define radeon_set_memory_clock(rdev, e) (rdev)->asic->set_engine_clock((rdev), (e))
+#define radeon_set_memory_clock(rdev, e) (rdev)->asic->set_memory_clock((rdev), (e))
+#define radeon_get_pcie_lanes(rdev) (rdev)->asic->get_pcie_lanes((rdev))
 #define radeon_set_pcie_lanes(rdev, l) (rdev)->asic->set_pcie_lanes((rdev), (l))
 #define radeon_set_clock_gating(rdev, e) (rdev)->asic->set_clock_gating((rdev), (e))
 #define radeon_set_surface_reg(rdev, r, f, p, o, s) ((rdev)->asic->set_surface_reg((rdev), (r), (f), (p), (o), (s)))
 #define radeon_clear_surface_reg(rdev, r) ((rdev)->asic->clear_surface_reg((rdev), (r)))
 #define radeon_bandwidth_update(rdev) (rdev)->asic->bandwidth_update((rdev))
+#define radeon_hpd_init(rdev) (rdev)->asic->hpd_init((rdev))
+#define radeon_hpd_fini(rdev) (rdev)->asic->hpd_fini((rdev))
+#define radeon_hpd_sense(rdev, hpd) (rdev)->asic->hpd_sense((rdev), (hpd))
+#define radeon_hpd_set_polarity(rdev, hpd) (rdev)->asic->hpd_set_polarity((rdev), (hpd))
 
 /* Common functions */
+/* AGP */
+extern void radeon_agp_disable(struct radeon_device *rdev);
 extern int radeon_gart_table_vram_pin(struct radeon_device *rdev);
+extern void radeon_gart_restore(struct radeon_device *rdev);
 extern int radeon_modeset_init(struct radeon_device *rdev);
 extern void radeon_modeset_fini(struct radeon_device *rdev);
 extern bool radeon_card_posted(struct radeon_device *rdev);
+extern bool radeon_boot_test_post_card(struct radeon_device *rdev);
 extern int radeon_clocks_init(struct radeon_device *rdev);
 extern void radeon_clocks_fini(struct radeon_device *rdev);
 extern void radeon_scratch_init(struct radeon_device *rdev);
@@ -984,6 +1180,12 @@ extern void radeon_surface_init(struct radeon_device *rdev);
 extern int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data);
 extern void radeon_legacy_set_clock_gating(struct radeon_device *rdev, int enable);
 extern void radeon_atom_set_clock_gating(struct radeon_device *rdev, int enable);
+extern void radeon_ttm_placement_from_domain(struct radeon_bo *rbo, u32 domain);
+extern bool radeon_ttm_bo_is_radeon_bo(struct ttm_buffer_object *bo);
+extern void radeon_vram_location(struct radeon_device *rdev, struct radeon_mc *mc, u64 base);
+extern void radeon_gtt_location(struct radeon_device *rdev, struct radeon_mc *mc);
+extern int radeon_resume_kms(struct drm_device *dev);
+extern int radeon_suspend_kms(struct drm_device *dev, pm_message_t state);
 
 /* r100,rv100,rs100,rv200,rs200,r200,rv250,rs300,rv280 */
 struct r100_mc_save {
@@ -1021,7 +1223,7 @@ extern int r100_cp_reset(struct radeon_device *rdev);
 extern void r100_vga_render_disable(struct radeon_device *rdev);
 extern int r100_cs_track_check_pkt3_indx_buffer(struct radeon_cs_parser *p,
 						struct radeon_cs_packet *pkt,
-						struct radeon_object *robj);
+						struct radeon_bo *robj);
 extern int r100_cs_parse_packet0(struct radeon_cs_parser *p,
 				struct radeon_cs_packet *pkt,
 				const unsigned *auth, unsigned n,
@@ -1029,6 +1231,8 @@ extern int r100_cs_parse_packet0(struct radeon_cs_parser *p,
 extern int r100_cs_packet_parse(struct radeon_cs_parser *p,
 				struct radeon_cs_packet *pkt,
 				unsigned idx);
+extern void r100_enable_bm(struct radeon_device *rdev);
+extern void r100_set_common_regs(struct radeon_device *rdev);
 
 /* rv200,rv250,rv280 */
 extern void r200_set_safe_registers(struct radeon_device *rdev);
@@ -1036,7 +1240,7 @@ extern void r200_set_safe_registers(struct radeon_device *rdev);
 /* r300,r350,rv350,rv370,rv380 */
 extern void r300_set_reg_safe(struct radeon_device *rdev);
 extern void r300_mc_program(struct radeon_device *rdev);
-extern void r300_vram_info(struct radeon_device *rdev);
+extern void r300_mc_init(struct radeon_device *rdev);
 extern void r300_clock_startup(struct radeon_device *rdev);
 extern int r300_mc_wait_for_idle(struct radeon_device *rdev);
 extern int rv370_pcie_gart_init(struct radeon_device *rdev);
@@ -1045,7 +1249,6 @@ extern int rv370_pcie_gart_enable(struct radeon_device *rdev);
 extern void rv370_pcie_gart_disable(struct radeon_device *rdev);
 
 /* r420,r423,rv410 */
-extern int r420_mc_init(struct radeon_device *rdev);
 extern u32 r420_mc_rreg(struct radeon_device *rdev, u32 reg);
 extern void r420_mc_wreg(struct radeon_device *rdev, u32 reg, u32 v);
 extern int r420_debugfs_pipes_info_init(struct radeon_device *rdev);
@@ -1087,12 +1290,13 @@ extern void rs690_line_buffer_adjust(struct radeon_device *rdev,
 					struct drm_display_mode *mode2);
 
 /* r600, rv610, rv630, rv620, rv635, rv670, rs780, rs880 */
+extern void r600_vram_gtt_location(struct radeon_device *rdev, struct radeon_mc *mc);
 extern bool r600_card_posted(struct radeon_device *rdev);
 extern void r600_cp_stop(struct radeon_device *rdev);
 extern void r600_ring_init(struct radeon_device *rdev, unsigned ring_size);
 extern int r600_cp_resume(struct radeon_device *rdev);
+extern void r600_cp_fini(struct radeon_device *rdev);
 extern int r600_count_pipe_bits(uint32_t val);
-extern int r600_gart_clear_page(struct radeon_device *rdev, int i);
 extern int r600_mc_wait_for_idle(struct radeon_device *rdev);
 extern int r600_pcie_gart_init(struct radeon_device *rdev);
 extern void r600_pcie_gart_tlb_flush(struct radeon_device *rdev);
@@ -1104,7 +1308,38 @@ extern void r600_wb_disable(struct radeon_device *rdev);
 extern void r600_scratch_init(struct radeon_device *rdev);
 extern int r600_blit_init(struct radeon_device *rdev);
 extern void r600_blit_fini(struct radeon_device *rdev);
-extern int r600_cp_init_microcode(struct radeon_device *rdev);
+extern int r600_init_microcode(struct radeon_device *rdev);
 extern int r600_gpu_reset(struct radeon_device *rdev);
+/* r600 irq */
+extern int r600_irq_init(struct radeon_device *rdev);
+extern void r600_irq_fini(struct radeon_device *rdev);
+extern void r600_ih_ring_init(struct radeon_device *rdev, unsigned ring_size);
+extern int r600_irq_set(struct radeon_device *rdev);
+extern void r600_irq_suspend(struct radeon_device *rdev);
+/* r600 audio */
+extern int r600_audio_init(struct radeon_device *rdev);
+extern int r600_audio_tmds_index(struct drm_encoder *encoder);
+extern void r600_audio_set_clock(struct drm_encoder *encoder, int clock);
+extern void r600_audio_fini(struct radeon_device *rdev);
+extern void r600_hdmi_init(struct drm_encoder *encoder);
+extern void r600_hdmi_enable(struct drm_encoder *encoder, int enable);
+extern void r600_hdmi_setmode(struct drm_encoder *encoder, struct drm_display_mode *mode);
+extern int r600_hdmi_buffer_status_changed(struct drm_encoder *encoder);
+extern void r600_hdmi_update_audio_settings(struct drm_encoder *encoder,
+					    int channels,
+					    int rate,
+					    int bps,
+					    uint8_t status_bits,
+					    uint8_t category_code);
+
+/* evergreen */
+struct evergreen_mc_save {
+	u32 vga_control[6];
+	u32 vga_render_control;
+	u32 vga_hdp_control;
+	u32 crtc_control[6];
+};
+
+#include "radeon_object.h"
 
 #endif

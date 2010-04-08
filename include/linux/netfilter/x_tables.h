@@ -6,8 +6,7 @@
 #define XT_FUNCTION_MAXNAMELEN 30
 #define XT_TABLE_MAXNAMELEN 32
 
-struct xt_entry_match
-{
+struct xt_entry_match {
 	union {
 		struct {
 			__u16 match_size;
@@ -31,8 +30,7 @@ struct xt_entry_match
 	unsigned char data[0];
 };
 
-struct xt_entry_target
-{
+struct xt_entry_target {
 	union {
 		struct {
 			__u16 target_size;
@@ -64,16 +62,14 @@ struct xt_entry_target
 	},								       \
 }
 
-struct xt_standard_target
-{
+struct xt_standard_target {
 	struct xt_entry_target target;
 	int verdict;
 };
 
 /* The argument to IPT_SO_GET_REVISION_*.  Returns highest revision
  * kernel supports, if >= revision. */
-struct xt_get_revision
-{
+struct xt_get_revision {
 	char name[XT_FUNCTION_MAXNAMELEN-1];
 
 	__u8 revision;
@@ -90,16 +86,14 @@ struct xt_get_revision
  * ip6t_entry and arpt_entry.  This sucks, and it is a hack.  It will be my
  * personal pleasure to remove it -HW
  */
-struct _xt_align
-{
+struct _xt_align {
 	__u8 u8;
 	__u16 u16;
 	__u32 u32;
 	__u64 u64;
 };
 
-#define XT_ALIGN(s) (((s) + (__alignof__(struct _xt_align)-1)) 	\
-			& ~(__alignof__(struct _xt_align)-1))
+#define XT_ALIGN(s) ALIGN((s), __alignof__(struct _xt_align))
 
 /* Standard return verdict, or do jump. */
 #define XT_STANDARD_TARGET ""
@@ -109,14 +103,12 @@ struct _xt_align
 #define SET_COUNTER(c,b,p) do { (c).bcnt = (b); (c).pcnt = (p); } while(0)
 #define ADD_COUNTER(c,b,p) do { (c).bcnt += (b); (c).pcnt += (p); } while(0)
 
-struct xt_counters
-{
+struct xt_counters {
 	__u64 pcnt, bcnt;			/* Packet and byte counters */
 };
 
 /* The argument to IPT_SO_ADD_COUNTERS. */
-struct xt_counters_info
-{
+struct xt_counters_info {
 	/* Which table. */
 	char name[XT_TABLE_MAXNAMELEN];
 
@@ -128,6 +120,7 @@ struct xt_counters_info
 
 #define XT_INV_PROTO		0x40	/* Invert the sense of PROTO. */
 
+#ifndef __KERNEL__
 /* fn returns 0 to continue iteration */
 #define XT_MATCH_ITERATE(type, e, fn, args...)			\
 ({								\
@@ -171,6 +164,22 @@ struct xt_counters_info
 #define XT_ENTRY_ITERATE(type, entries, size, fn, args...) \
 	XT_ENTRY_ITERATE_CONTINUE(type, entries, size, 0, fn, args)
 
+#endif /* !__KERNEL__ */
+
+/* pos is normally a struct ipt_entry/ip6t_entry/etc. */
+#define xt_entry_foreach(pos, ehead, esize) \
+	for ((pos) = (typeof(pos))(ehead); \
+	     (pos) < (typeof(pos))((char *)(ehead) + (esize)); \
+	     (pos) = (typeof(pos))((char *)(pos) + (pos)->next_offset))
+
+/* can only be xt_entry_match, so no use of typeof here */
+#define xt_ematch_foreach(pos, entry) \
+	for ((pos) = (struct xt_entry_match *)entry->elems; \
+	     (pos) < (struct xt_entry_match *)((char *)(entry) + \
+	             (entry)->target_offset); \
+	     (pos) = (struct xt_entry_match *)((char *)(pos) + \
+	             (pos)->u.match_size))
+
 #ifdef __KERNEL__
 
 #include <linux/netdevice.h>
@@ -212,6 +221,7 @@ struct xt_match_param {
  * @hook_mask:	via which hooks the new rule is reachable
  */
 struct xt_mtchk_param {
+	struct net *net;
 	const char *table;
 	const void *entryinfo;
 	const struct xt_match *match;
@@ -222,6 +232,7 @@ struct xt_mtchk_param {
 
 /* Match destructor parameters */
 struct xt_mtdtor_param {
+	struct net *net;
 	const struct xt_match *match;
 	void *matchinfo;
 	u_int8_t family;
@@ -254,6 +265,7 @@ struct xt_target_param {
  * Other fields see above.
  */
 struct xt_tgchk_param {
+	struct net *net;
 	const char *table;
 	const void *entryinfo;
 	const struct xt_target *target;
@@ -264,13 +276,13 @@ struct xt_tgchk_param {
 
 /* Target destructor parameters */
 struct xt_tgdtor_param {
+	struct net *net;
 	const struct xt_target *target;
 	void *targinfo;
 	u_int8_t family;
 };
 
-struct xt_match
-{
+struct xt_match {
 	struct list_head list;
 
 	const char name[XT_FUNCTION_MAXNAMELEN-1];
@@ -289,11 +301,11 @@ struct xt_match
 
 	/* Called when entry of this type deleted. */
 	void (*destroy)(const struct xt_mtdtor_param *);
-
+#ifdef CONFIG_COMPAT
 	/* Called when userspace align differs from kernel space one */
-	void (*compat_from_user)(void *dst, void *src);
-	int (*compat_to_user)(void __user *dst, void *src);
-
+	void (*compat_from_user)(void *dst, const void *src);
+	int (*compat_to_user)(void __user *dst, const void *src);
+#endif
 	/* Set this to THIS_MODULE if you are a module, otherwise NULL */
 	struct module *me;
 
@@ -302,7 +314,9 @@ struct xt_match
 
 	const char *table;
 	unsigned int matchsize;
+#ifdef CONFIG_COMPAT
 	unsigned int compatsize;
+#endif
 	unsigned int hooks;
 	unsigned short proto;
 
@@ -310,8 +324,7 @@ struct xt_match
 };
 
 /* Registration hooks for targets. */
-struct xt_target
-{
+struct xt_target {
 	struct list_head list;
 
 	const char name[XT_FUNCTION_MAXNAMELEN-1];
@@ -330,17 +343,19 @@ struct xt_target
 
 	/* Called when entry of this type deleted. */
 	void (*destroy)(const struct xt_tgdtor_param *);
-
+#ifdef CONFIG_COMPAT
 	/* Called when userspace align differs from kernel space one */
-	void (*compat_from_user)(void *dst, void *src);
-	int (*compat_to_user)(void __user *dst, void *src);
-
+	void (*compat_from_user)(void *dst, const void *src);
+	int (*compat_to_user)(void __user *dst, const void *src);
+#endif
 	/* Set this to THIS_MODULE if you are a module, otherwise NULL */
 	struct module *me;
 
 	const char *table;
 	unsigned int targetsize;
+#ifdef CONFIG_COMPAT
 	unsigned int compatsize;
+#endif
 	unsigned int hooks;
 	unsigned short proto;
 
@@ -349,8 +364,7 @@ struct xt_target
 };
 
 /* Furniture shopping... */
-struct xt_table
-{
+struct xt_table {
 	struct list_head list;
 
 	/* What hooks you will enter on */
@@ -363,6 +377,7 @@ struct xt_table
 	struct module *me;
 
 	u_int8_t af;		/* address/protocol family */
+	int priority;		/* hook order */
 
 	/* A unique name... */
 	const char name[XT_TABLE_MAXNAMELEN];
@@ -371,8 +386,7 @@ struct xt_table
 #include <linux/netfilter_ipv4.h>
 
 /* The table itself */
-struct xt_table_info
-{
+struct xt_table_info {
 	/* Size per table */
 	unsigned int size;
 	/* Number of entries: FIXME. --RR */
@@ -525,11 +539,13 @@ static inline unsigned long ifname_compare_aligned(const char *_a,
 	return ret;
 }
 
+extern struct nf_hook_ops *xt_hook_link(const struct xt_table *, nf_hookfn *);
+extern void xt_hook_unlink(const struct xt_table *, struct nf_hook_ops *);
+
 #ifdef CONFIG_COMPAT
 #include <net/compat.h>
 
-struct compat_xt_entry_match
-{
+struct compat_xt_entry_match {
 	union {
 		struct {
 			u_int16_t match_size;
@@ -545,8 +561,7 @@ struct compat_xt_entry_match
 	unsigned char data[0];
 };
 
-struct compat_xt_entry_target
-{
+struct compat_xt_entry_target {
 	union {
 		struct {
 			u_int16_t target_size;
@@ -566,42 +581,42 @@ struct compat_xt_entry_target
  * need to change whole approach in order to calculate align as function of
  * current task alignment */
 
-struct compat_xt_counters
-{
-#if defined(CONFIG_X86_64) || defined(CONFIG_IA64)
-	u_int32_t cnt[4];
-#else
-	u_int64_t cnt[2];
-#endif
+struct compat_xt_counters {
+	compat_u64 pcnt, bcnt;			/* Packet and byte counters */
 };
 
-struct compat_xt_counters_info
-{
+struct compat_xt_counters_info {
 	char name[XT_TABLE_MAXNAMELEN];
 	compat_uint_t num_counters;
 	struct compat_xt_counters counters[0];
 };
 
-#define COMPAT_XT_ALIGN(s) (((s) + (__alignof__(struct compat_xt_counters)-1)) \
-		& ~(__alignof__(struct compat_xt_counters)-1))
+struct _compat_xt_align {
+	__u8 u8;
+	__u16 u16;
+	__u32 u32;
+	compat_u64 u64;
+};
+
+#define COMPAT_XT_ALIGN(s) ALIGN((s), __alignof__(struct _compat_xt_align))
 
 extern void xt_compat_lock(u_int8_t af);
 extern void xt_compat_unlock(u_int8_t af);
 
 extern int xt_compat_add_offset(u_int8_t af, unsigned int offset, short delta);
 extern void xt_compat_flush_offsets(u_int8_t af);
-extern short xt_compat_calc_jump(u_int8_t af, unsigned int offset);
+extern int xt_compat_calc_jump(u_int8_t af, unsigned int offset);
 
 extern int xt_compat_match_offset(const struct xt_match *match);
 extern int xt_compat_match_from_user(struct xt_entry_match *m,
 				     void **dstptr, unsigned int *size);
-extern int xt_compat_match_to_user(struct xt_entry_match *m,
+extern int xt_compat_match_to_user(const struct xt_entry_match *m,
 				   void __user **dstptr, unsigned int *size);
 
 extern int xt_compat_target_offset(const struct xt_target *target);
 extern void xt_compat_target_from_user(struct xt_entry_target *t,
 				       void **dstptr, unsigned int *size);
-extern int xt_compat_target_to_user(struct xt_entry_target *t,
+extern int xt_compat_target_to_user(const struct xt_entry_target *t,
 				    void __user **dstptr, unsigned int *size);
 
 #endif /* CONFIG_COMPAT */

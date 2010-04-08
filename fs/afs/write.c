@@ -585,27 +585,6 @@ int afs_writepages(struct address_space *mapping,
 }
 
 /*
- * write an inode back
- */
-int afs_write_inode(struct inode *inode, int sync)
-{
-	struct afs_vnode *vnode = AFS_FS_I(inode);
-	int ret;
-
-	_enter("{%x:%u},", vnode->fid.vid, vnode->fid.vnode);
-
-	ret = 0;
-	if (sync) {
-		ret = filemap_fdatawait(inode->i_mapping);
-		if (ret < 0)
-			__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
-	}
-
-	_leave(" = %d", ret);
-	return ret;
-}
-
-/*
  * completion of write to server
  */
 void afs_pages_written_back(struct afs_vnode *vnode, struct afs_call *call)
@@ -671,7 +650,6 @@ ssize_t afs_file_write(struct kiocb *iocb, const struct iovec *iov,
 	struct afs_vnode *vnode = AFS_FS_I(dentry->d_inode);
 	ssize_t result;
 	size_t count = iov_length(iov, nr_segs);
-	int ret;
 
 	_enter("{%x.%u},{%zu},%lu,",
 	       vnode->fid.vid, vnode->fid.vnode, count, nr_segs);
@@ -689,13 +667,6 @@ ssize_t afs_file_write(struct kiocb *iocb, const struct iovec *iov,
 	if (IS_ERR_VALUE(result)) {
 		_leave(" = %zd", result);
 		return result;
-	}
-
-	/* return error values for O_SYNC and IS_SYNC() */
-	if (IS_SYNC(&vnode->vfs_inode) || iocb->ki_filp->f_flags & O_SYNC) {
-		ret = afs_fsync(iocb->ki_filp, dentry, 1);
-		if (ret < 0)
-			result = ret;
 	}
 
 	_leave(" = %zd", result);

@@ -748,8 +748,8 @@ static void smsc911x_phy_adjust_link(struct net_device *dev)
 			 * usage is 10/100 indicator */
 			pdata->gpio_setting = smsc911x_reg_read(pdata,
 				GPIO_CFG);
-			if ((pdata->gpio_setting & GPIO_CFG_LED1_EN_)
-			    && (!pdata->using_extphy)) {
+			if ((pdata->gpio_setting & GPIO_CFG_LED1_EN_) &&
+			    (!pdata->using_extphy)) {
 				/* Force 10/100 LED off, after saving
 				 * orginal GPIO configuration */
 				pdata->gpio_orig_setting = pdata->gpio_setting;
@@ -770,29 +770,25 @@ static int smsc911x_mii_probe(struct net_device *dev)
 {
 	struct smsc911x_data *pdata = netdev_priv(dev);
 	struct phy_device *phydev = NULL;
-	int phy_addr;
+	int ret;
 
 	/* find the first phy */
-	for (phy_addr = 0; phy_addr < PHY_MAX_ADDR; phy_addr++) {
-		if (pdata->mii_bus->phy_map[phy_addr]) {
-			phydev = pdata->mii_bus->phy_map[phy_addr];
-			SMSC_TRACE(PROBE, "PHY %d: addr %d, phy_id 0x%08X",
-				phy_addr, phydev->addr, phydev->phy_id);
-			break;
-		}
-	}
-
+	phydev = phy_find_first(pdata->mii_bus);
 	if (!phydev) {
 		pr_err("%s: no PHY found\n", dev->name);
 		return -ENODEV;
 	}
 
-	phydev = phy_connect(dev, dev_name(&phydev->dev),
-		&smsc911x_phy_adjust_link, 0, pdata->config.phy_interface);
+	SMSC_TRACE(PROBE, "PHY %d: addr %d, phy_id 0x%08X",
+			phy_addr, phydev->addr, phydev->phy_id);
 
-	if (IS_ERR(phydev)) {
+	ret = phy_connect_direct(dev, phydev,
+			&smsc911x_phy_adjust_link, 0,
+			pdata->config.phy_interface);
+
+	if (ret) {
 		pr_err("%s: Could not attach to PHY\n", dev->name);
-		return PTR_ERR(phydev);
+		return ret;
 	}
 
 	pr_info("%s: attached PHY driver [%s] (mii_bus:phy_addr=%s, irq=%d)\n",
@@ -816,7 +812,7 @@ static int smsc911x_mii_probe(struct net_device *dev)
 	SMSC_TRACE(HW, "Passed Loop Back Test");
 #endif				/* USE_PHY_WORK_AROUND */
 
-	SMSC_TRACE(HW, "phy initialised succesfully");
+	SMSC_TRACE(HW, "phy initialised successfully");
 	return 0;
 }
 
@@ -1383,33 +1379,24 @@ static void smsc911x_set_multicast_list(struct net_device *dev)
 		pdata->clear_bits_mask = (MAC_CR_PRMS_ | MAC_CR_HPFILT_);
 		pdata->hashhi = 0;
 		pdata->hashlo = 0;
-	} else if (dev->mc_count > 0) {
+	} else if (!netdev_mc_empty(dev)) {
 		/* Enabling specific multicast addresses */
 		unsigned int hash_high = 0;
 		unsigned int hash_low = 0;
-		unsigned int count = 0;
-		struct dev_mc_list *mc_list = dev->mc_list;
+		struct dev_mc_list *mc_list;
 
 		pdata->set_bits_mask = MAC_CR_HPFILT_;
 		pdata->clear_bits_mask = (MAC_CR_PRMS_ | MAC_CR_MCPAS_);
 
-		while (mc_list) {
-			count++;
-			if ((mc_list->dmi_addrlen) == ETH_ALEN) {
-				unsigned int bitnum =
-				    smsc911x_hash(mc_list->dmi_addr);
-				unsigned int mask = 0x01 << (bitnum & 0x1F);
-				if (bitnum & 0x20)
-					hash_high |= mask;
-				else
-					hash_low |= mask;
-			} else {
-				SMSC_WARNING(DRV, "dmi_addrlen != 6");
-			}
-			mc_list = mc_list->next;
+		netdev_for_each_mc_addr(mc_list, dev) {
+			unsigned int bitnum = smsc911x_hash(mc_list->dmi_addr);
+			unsigned int mask = 0x01 << (bitnum & 0x1F);
+
+			if (bitnum & 0x20)
+				hash_high |= mask;
+			else
+				hash_low |= mask;
 		}
-		if (count != (unsigned int)dev->mc_count)
-			SMSC_WARNING(DRV, "mc_count != dev->mc_count");
 
 		pdata->hashhi = hash_high;
 		pdata->hashlo = hash_low;
@@ -2073,6 +2060,9 @@ static int __devinit smsc911x_drv_probe(struct platform_device *pdev)
 	if (is_valid_ether_addr(dev->dev_addr)) {
 		smsc911x_set_hw_mac_address(pdata, dev->dev_addr);
 		SMSC_TRACE(PROBE, "MAC Address is specified by configuration");
+	} else if (is_valid_ether_addr(pdata->config.mac)) {
+		memcpy(dev->dev_addr, pdata->config.mac, 6);
+		SMSC_TRACE(PROBE, "MAC Address specified by platform data");
 	} else {
 		/* Try reading mac address from device. if EEPROM is present
 		 * it will already have been set */
@@ -2153,7 +2143,7 @@ static int smsc911x_resume(struct device *dev)
 	return (to == 0) ? -EIO : 0;
 }
 
-static struct dev_pm_ops smsc911x_pm_ops = {
+static const struct dev_pm_ops smsc911x_pm_ops = {
 	.suspend	= smsc911x_suspend,
 	.resume		= smsc911x_resume,
 };

@@ -716,10 +716,10 @@ static int myri_header(struct sk_buff *skb, struct net_device *dev,
 	pad[0] = MYRI_PAD_LEN;
 	pad[1] = 0xab;
 
-	/* Set the protocol type. For a packet of type ETH_P_802_3 we put the length
-	 * in here instead. It is up to the 802.2 layer to carry protocol information.
+	/* Set the protocol type. For a packet of type ETH_P_802_3/2 we put the
+	 * length in here instead.
 	 */
-	if (type != ETH_P_802_3)
+	if (type != ETH_P_802_3 && type != ETH_P_802_2)
 		eth->h_proto = htons(type);
 	else
 		eth->h_proto = htons(len);
@@ -1084,7 +1084,7 @@ static int __devinit myri_sbus_probe(struct of_device *op, const struct of_devic
 
 	/* Register interrupt handler now. */
 	DET(("Requesting MYRIcom IRQ line.\n"));
-	if (request_irq(dev->irq, &myri_interrupt,
+	if (request_irq(dev->irq, myri_interrupt,
 			IRQF_SHARED, "MyriCOM Ethernet", (void *) dev)) {
 		printk("MyriCOM: Cannot register interrupt handler.\n");
 		goto err;

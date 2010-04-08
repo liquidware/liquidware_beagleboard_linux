@@ -156,7 +156,7 @@ struct net_device *alloc_ieee80211(int sizeof_priv)
  	ieee->privacy_invoked = 0;
  	ieee->ieee802_1x = 1;
 	ieee->raw_tx = 0;
-	//ieee->hwsec_support = 1; //defalt support hw security. //use module_param instead.
+	//ieee->hwsec_support = 1; //default support hw security. //use module_param instead.
 	ieee->hwsec_active = 0; //disable hwsec, switch it on when necessary.
 
 	ieee80211_softmac_init(ieee);
@@ -262,7 +262,7 @@ static int store_debug_level(struct file *file, const char *buffer,
 			     unsigned long count, void *data)
 {
 	char buf[] = "0x00000000";
-	unsigned long len = min(sizeof(buf) - 1, count);
+	unsigned long len = min_t(unsigned long, sizeof(buf) - 1, count);
 	char *p = (char *)buf;
 	unsigned long val;
 

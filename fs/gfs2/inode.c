@@ -45,7 +45,7 @@ static int iget_test(struct inode *inode, void *opaque)
 	struct gfs2_inode *ip = GFS2_I(inode);
 	u64 *no_addr = opaque;
 
-	if (ip->i_no_addr == *no_addr && test_bit(GIF_USER, &ip->i_flags))
+	if (ip->i_no_addr == *no_addr)
 		return 1;
 
 	return 0;
@@ -58,7 +58,6 @@ static int iget_set(struct inode *inode, void *opaque)
 
 	inode->i_ino = (unsigned long)*no_addr;
 	ip->i_no_addr = *no_addr;
-	set_bit(GIF_USER, &ip->i_flags);
 	return 0;
 }
 
@@ -84,7 +83,7 @@ static int iget_skip_test(struct inode *inode, void *opaque)
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_skip_data *data = opaque;
 
-	if (ip->i_no_addr == data->no_addr && test_bit(GIF_USER, &ip->i_flags)){
+	if (ip->i_no_addr == data->no_addr) {
 		if (inode->i_state & (I_FREEING|I_CLEAR|I_WILL_FREE)){
 			data->skipped = 1;
 			return 0;
@@ -103,7 +102,6 @@ static int iget_skip_set(struct inode *inode, void *opaque)
 		return 1;
 	inode->i_ino = (unsigned long)(data->no_addr);
 	ip->i_no_addr = data->no_addr;
-	set_bit(GIF_USER, &ip->i_flags);
 	return 0;
 }
 
@@ -125,7 +123,7 @@ static struct inode *gfs2_iget_skip(struct super_block *sb,
  * directory entry when gfs2_inode_lookup() is invoked. Part of the code
  * segment inside gfs2_inode_lookup code needs to get moved around.
  *
- * Clean up I_LOCK and I_NEW as well.
+ * Clears I_NEW as well.
  **/
 
 void gfs2_set_iop(struct inode *inode)
@@ -801,7 +799,8 @@ static int gfs2_security_init(struct gfs2_inode *dip, struct gfs2_inode *ip)
 		return err;
 	}
 
-	err = gfs2_xattr_set(&ip->i_inode, GFS2_EATYPE_SECURITY, name, value, len, 0);
+	err = __gfs2_xattr_set(&ip->i_inode, name, value, len, 0,
+			       GFS2_EATYPE_SECURITY);
 	kfree(value);
 	kfree(name);
 
@@ -871,7 +870,7 @@ struct inode *gfs2_createi(struct gfs2_holder *ghs, const struct qstr *name,
 	if (error)
 		goto fail_gunlock2;
 
-	error = gfs2_acl_create(dip, GFS2_I(inode));
+	error = gfs2_acl_create(dip, inode);
 	if (error)
 		goto fail_gunlock2;
 
@@ -947,9 +946,7 @@ void gfs2_dinode_out(const struct gfs2_inode *ip, void *buf)
 
 	str->di_header.mh_magic = cpu_to_be32(GFS2_MAGIC);
 	str->di_header.mh_type = cpu_to_be32(GFS2_METATYPE_DI);
-	str->di_header.__pad0 = 0;
 	str->di_header.mh_format = cpu_to_be32(GFS2_FORMAT_DI);
-	str->di_header.__pad1 = 0;
 	str->di_num.no_addr = cpu_to_be64(ip->i_no_addr);
 	str->di_num.no_formal_ino = cpu_to_be64(ip->i_no_formal_ino);
 	str->di_mode = cpu_to_be32(ip->i_inode.i_mode);

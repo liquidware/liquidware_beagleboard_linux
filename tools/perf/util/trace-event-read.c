@@ -18,7 +18,7 @@
  *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
-#define _LARGEFILE64_SOURCE
+#define _FILE_OFFSET_BITS 64
 
 #include <dirent.h>
 #include <stdio.h>
@@ -83,7 +83,7 @@ static char *read_string(void)
 	char *str = NULL;
 	int size = 0;
 	int i;
-	int r;
+	off_t r;
 
 	for (;;) {
 		r = read(input_fd, buf, BUFSIZ);
@@ -118,7 +118,7 @@ static char *read_string(void)
 
 	/* move the file descriptor to the end of the string */
 	r = lseek(input_fd, -(r - i), SEEK_CUR);
-	if (r < 0)
+	if (r == (off_t)-1)
 		die("lseek");
 
 	if (str) {
@@ -145,8 +145,9 @@ static void read_proc_kallsyms(void)
 	if (!size)
 		return;
 
-	buf = malloc_or_die(size);
+	buf = malloc_or_die(size + 1);
 	read_or_die(buf, size);
+	buf[size] = '\0';
 
 	parse_proc_kallsyms(buf, size);
 
@@ -281,8 +282,8 @@ static void update_cpu_data_index(int cpu)
 
 static void get_next_page(int cpu)
 {
-	off64_t save_seek;
-	off64_t ret;
+	off_t save_seek;
+	off_t ret;
 
 	if (!cpu_data[cpu].page)
 		return;
@@ -297,17 +298,17 @@ static void get_next_page(int cpu)
 		update_cpu_data_index(cpu);
 
 		/* other parts of the code may expect the pointer to not move */
-		save_seek = lseek64(input_fd, 0, SEEK_CUR);
+		save_seek = lseek(input_fd, 0, SEEK_CUR);
 
-		ret = lseek64(input_fd, cpu_data[cpu].offset, SEEK_SET);
-		if (ret < 0)
+		ret = lseek(input_fd, cpu_data[cpu].offset, SEEK_SET);
+		if (ret == (off_t)-1)
 			die("failed to lseek");
 		ret = read(input_fd, cpu_data[cpu].page, page_size);
 		if (ret < 0)
 			die("failed to read page");
 
 		/* reset the file pointer back */
-		lseek64(input_fd, save_seek, SEEK_SET);
+		lseek(input_fd, save_seek, SEEK_SET);
 
 		return;
 	}
@@ -458,9 +459,8 @@ struct record *trace_read_data(int cpu)
 	return data;
 }
 
-void trace_report(void)
+void trace_report(int fd)
 {
-	const char *input_file = "trace.info";
 	char buf[BUFSIZ];
 	char test[] = { 23, 8, 68 };
 	char *version;
@@ -468,17 +468,15 @@ void trace_report(void)
 	int show_funcs = 0;
 	int show_printk = 0;
 
-	input_fd = open(input_file, O_RDONLY);
-	if (input_fd < 0)
-		die("opening '%s'\n", input_file);
+	input_fd = fd;
 
 	read_or_die(buf, 3);
 	if (memcmp(buf, test, 3) != 0)
-		die("not an trace data file");
+		die("no trace data in the file");
 
 	read_or_die(buf, 7);
 	if (memcmp(buf, "tracing", 7) != 0)
-		die("not a trace file (missing tracing)");
+		die("not a trace file (missing 'tracing' tag)");
 
 	version = read_string();
 	if (show_version)

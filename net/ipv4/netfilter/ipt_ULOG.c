@@ -226,9 +226,9 @@ static void ipt_ulog_packet(unsigned int hooknum,
 	else
 		*(pm->prefix) = '\0';
 
-	if (in && in->hard_header_len > 0
-	    && skb->mac_header != skb->network_header
-	    && in->hard_header_len <= ULOG_MAC_LEN) {
+	if (in && in->hard_header_len > 0 &&
+	    skb->mac_header != skb->network_header &&
+	    in->hard_header_len <= ULOG_MAC_LEN) {
 		memcpy(pm->mac, skb_mac_header(skb), in->hard_header_len);
 		pm->mac_len = in->hard_header_len;
 	} else
@@ -338,7 +338,7 @@ struct compat_ipt_ulog_info {
 	char		prefix[ULOG_PREFIX_LEN];
 };
 
-static void ulog_tg_compat_from_user(void *dst, void *src)
+static void ulog_tg_compat_from_user(void *dst, const void *src)
 {
 	const struct compat_ipt_ulog_info *cl = src;
 	struct ipt_ulog_info l = {
@@ -351,7 +351,7 @@ static void ulog_tg_compat_from_user(void *dst, void *src)
 	memcpy(dst, &l, sizeof(l));
 }
 
-static int ulog_tg_compat_to_user(void __user *dst, void *src)
+static int ulog_tg_compat_to_user(void __user *dst, const void *src)
 {
 	const struct ipt_ulog_info *l = src;
 	struct compat_ipt_ulog_info cl = {

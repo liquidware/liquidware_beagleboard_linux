@@ -14,13 +14,13 @@
 
 #ifdef __KERNEL__
 
-#include <asm/lowcore.h>
-#include <asm/types.h>
-
 #define PARMAREA		0x10400
 #define MEMORY_CHUNKS		256
 
 #ifndef __ASSEMBLY__
+
+#include <asm/lowcore.h>
+#include <asm/types.h>
 
 #ifndef __s390x__
 #define IPL_DEVICE        (*(unsigned long *)  (0x10404))
@@ -49,17 +49,12 @@ extern unsigned long memory_end;
 
 void detect_memory_layout(struct mem_chunk chunk[]);
 
-#ifdef CONFIG_S390_SWITCH_AMODE
-extern unsigned int switch_amode;
-#else
-#define switch_amode	(0)
-#endif
+#define PRIMARY_SPACE_MODE	0
+#define ACCESS_REGISTER_MODE	1
+#define SECONDARY_SPACE_MODE	2
+#define HOME_SPACE_MODE		3
 
-#ifdef CONFIG_S390_EXEC_PROTECT
-extern unsigned int s390_noexec;
-#else
-#define s390_noexec	(0)
-#endif
+extern unsigned int user_mode;
 
 /*
  * Machine features detected in head.S
@@ -76,9 +71,12 @@ extern unsigned int s390_noexec;
 #define MACHINE_FLAG_KVM	(1UL << 9)
 #define MACHINE_FLAG_HPAGE	(1UL << 10)
 #define MACHINE_FLAG_PFMF	(1UL << 11)
+#define MACHINE_FLAG_LPAR	(1UL << 12)
 
 #define MACHINE_IS_VM		(S390_lowcore.machine_flags & MACHINE_FLAG_VM)
 #define MACHINE_IS_KVM		(S390_lowcore.machine_flags & MACHINE_FLAG_KVM)
+#define MACHINE_IS_LPAR		(S390_lowcore.machine_flags & MACHINE_FLAG_LPAR)
+
 #define MACHINE_HAS_DIAG9C	(S390_lowcore.machine_flags & MACHINE_FLAG_DIAG9C)
 
 #ifndef __s390x__

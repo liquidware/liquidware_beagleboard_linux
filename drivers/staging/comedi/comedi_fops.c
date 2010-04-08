@@ -63,7 +63,7 @@ module_param(comedi_debug, int, 0644);
 int comedi_autoconfig = 1;
 module_param(comedi_autoconfig, bool, 0444);
 
-int comedi_num_legacy_minors = 0;
+int comedi_num_legacy_minors;
 module_param(comedi_num_legacy_minors, int, 0444);
 
 static DEFINE_SPINLOCK(comedi_file_info_table_lock);
@@ -110,13 +110,8 @@ static struct device_attribute dev_attr_read_buffer_kb;
 static struct device_attribute dev_attr_max_write_buffer_kb;
 static struct device_attribute dev_attr_write_buffer_kb;
 
-#ifdef HAVE_UNLOCKED_IOCTL
 static long comedi_unlocked_ioctl(struct file *file, unsigned int cmd,
 				  unsigned long arg)
-#else
-static int comedi_ioctl(struct inode *inode, struct file *file,
-			unsigned int cmd, unsigned long arg)
-#endif
 {
 	const unsigned minor = iminor(file->f_dentry->d_inode);
 	struct comedi_device_file_info *dev_file_info =
@@ -1515,7 +1510,7 @@ static unsigned int comedi_poll(struct file *file, poll_table * wait)
 }
 
 static ssize_t comedi_write(struct file *file, const char *buf, size_t nbytes,
-			    loff_t * offset)
+				loff_t *offset)
 {
 	struct comedi_subdevice *s;
 	struct comedi_async *async;
@@ -1617,7 +1612,7 @@ done:
 }
 
 static ssize_t comedi_read(struct file *file, char *buf, size_t nbytes,
-			   loff_t * offset)
+				loff_t *offset)
 {
 	struct comedi_subdevice *s;
 	struct comedi_async *async;
@@ -1867,14 +1862,8 @@ static int comedi_fasync(int fd, struct file *file, int on)
 
 const struct file_operations comedi_fops = {
 	.owner = THIS_MODULE,
-#ifdef HAVE_UNLOCKED_IOCTL
 	.unlocked_ioctl = comedi_unlocked_ioctl,
-#else
-	.ioctl = comedi_ioctl,
-#endif
-#ifdef HAVE_COMPAT_IOCTL
 	.compat_ioctl = comedi_compat_ioctl,
-#endif
 	.open = comedi_open,
 	.release = comedi_close,
 	.read = comedi_read,
@@ -1959,8 +1948,6 @@ static int __init comedi_init(void)
 		}
 	}
 
-	comedi_register_ioctl32();
-
 	return 0;
 }
 
@@ -1977,8 +1964,6 @@ static void __exit comedi_cleanup(void)
 	unregister_chrdev_region(MKDEV(COMEDI_MAJOR, 0), COMEDI_NUM_MINORS);
 
 	comedi_proc_cleanup();
-
-	comedi_unregister_ioctl32();
 }
 
 module_init(comedi_init);
@@ -2019,12 +2004,10 @@ void comedi_event(struct comedi_device *dev, struct comedi_subdevice *s)
 	if (async->cb_mask & s->async->events) {
 		if (comedi_get_subdevice_runflags(s) & SRF_USER) {
 			wake_up_interruptible(&async->wait_head);
-			if (s->subdev_flags & SDF_CMD_READ) {
+			if (s->subdev_flags & SDF_CMD_READ)
 				kill_fasync(&dev->async_queue, SIGIO, POLL_IN);
-			}
-			if (s->subdev_flags & SDF_CMD_WRITE) {
+			if (s->subdev_flags & SDF_CMD_WRITE)
 				kill_fasync(&dev->async_queue, SIGIO, POLL_OUT);
-			}
 		} else {
 			if (async->cb_func)
 				async->cb_func(s->async->events, async->cb_arg);

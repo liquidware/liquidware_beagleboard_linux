@@ -12,7 +12,7 @@
  *
  *  History:
  *    Apr 2002: Initial version [CS]
- *    Jun 2002: Properly seperated algo/adap [FB]
+ *    Jun 2002: Properly separated algo/adap [FB]
  *    Jan 2003: Fixed several bugs concerning interrupt handling [Kai-Uwe Bloem]
  *    Jan 2003: added limited signal handling [Kai-Uwe Bloem]
  *    Sep 2004: Major rework to ensure efficient bus handling [RMK]
@@ -1155,7 +1155,7 @@ static int i2c_pxa_resume_noirq(struct device *dev)
 	return 0;
 }
 
-static struct dev_pm_ops i2c_pxa_dev_pm_ops = {
+static const struct dev_pm_ops i2c_pxa_dev_pm_ops = {
 	.suspend_noirq = i2c_pxa_suspend_noirq,
 	.resume_noirq = i2c_pxa_resume_noirq,
 };

@@ -375,7 +375,7 @@ static struct vortex_chip_info {
 };
 
 
-static struct pci_device_id vortex_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(vortex_pci_tbl) = {
 	{ 0x10B7, 0x5900, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C590 },
 	{ 0x10B7, 0x5920, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C592 },
 	{ 0x10B7, 0x5970, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C597 },
@@ -837,7 +837,7 @@ static int vortex_resume(struct device *dev)
 	return 0;
 }
 
-static struct dev_pm_ops vortex_pm_ops = {
+static const struct dev_pm_ops vortex_pm_ops = {
 	.suspend = vortex_suspend,
 	.resume = vortex_resume,
 	.freeze = vortex_suspend,
@@ -1942,8 +1942,8 @@ vortex_error(struct net_device *dev, int status)
 	if (status & TxComplete) {			/* Really "TxError" for us. */
 		tx_status = ioread8(ioaddr + TxStatus);
 		/* Presumably a tx-timeout. We must merely re-enable. */
-		if (vortex_debug > 2
-			|| (tx_status != 0x88 && vortex_debug > 0)) {
+		if (vortex_debug > 2 ||
+		    (tx_status != 0x88 && vortex_debug > 0)) {
 			pr_err("%s: Transmit error, Tx status register %2.2x.\n",
 				   dev->name, tx_status);
 			if (tx_status == 0x82) {
@@ -2560,7 +2560,7 @@ boomerang_rx(struct net_device *dev)
 		struct sk_buff *skb;
 		entry = vp->dirty_rx % RX_RING_SIZE;
 		if (vp->rx_skbuff[entry] == NULL) {
-			skb = netdev_alloc_skb(dev, PKT_BUF_SZ + NET_IP_ALIGN);
+			skb = netdev_alloc_skb_ip_align(dev, PKT_BUF_SZ);
 			if (skb == NULL) {
 				static unsigned long last_jif;
 				if (time_after(jiffies, last_jif + 10 * HZ)) {
@@ -2572,7 +2572,6 @@ boomerang_rx(struct net_device *dev)
 				break;			/* Bad news!  */
 			}
 
-			skb_reserve(skb, NET_IP_ALIGN);
 			vp->rx_ring[entry].addr = cpu_to_le32(pci_map_single(VORTEX_PCI(vp), skb->data, PKT_BUF_SZ, PCI_DMA_FROMDEVICE));
 			vp->rx_skbuff[entry] = skb;
 		}
@@ -2971,7 +2970,7 @@ static void set_rx_mode(struct net_device *dev)
 		if (vortex_debug > 3)
 			pr_notice("%s: Setting promiscuous mode.\n", dev->name);
 		new_mode = SetRxFilter|RxStation|RxMulticast|RxBroadcast|RxProm;
-	} else	if ((dev->mc_list)  ||  (dev->flags & IFF_ALLMULTI)) {
+	} else	if (!netdev_mc_empty(dev) || dev->flags & IFF_ALLMULTI) {
 		new_mode = SetRxFilter|RxStation|RxMulticast|RxBroadcast;
 	} else
 		new_mode = SetRxFilter | RxStation | RxBroadcast;

@@ -2,14 +2,14 @@ obj-$(CONFIG_MAC80211) += mac80211.o
 
 # mac80211 objects
 mac80211-y := \
-	main.o \
+	main.o status.o \
 	sta_info.o \
 	wep.o \
 	wpa.o \
-	scan.o \
+	scan.o offchannel.o \
 	ht.o agg-tx.o agg-rx.o \
 	ibss.o \
-	mlme.o \
+	mlme.o work.o \
 	iface.o \
 	rate.o \
 	michael.o \

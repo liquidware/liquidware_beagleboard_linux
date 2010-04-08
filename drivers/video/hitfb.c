@@ -325,7 +325,7 @@ static struct fb_ops hitfb_ops = {
 	.fb_imageblit	= cfb_imageblit,
 };
 
-static int __init hitfb_probe(struct platform_device *dev)
+static int __devinit hitfb_probe(struct platform_device *dev)
 {
 	unsigned short lcdclor, ldr3, ldvndr;
 	struct fb_info *info;
@@ -456,7 +456,7 @@ static int hitfb_resume(struct device *dev)
 	return 0;
 }
 
-static struct dev_pm_ops hitfb_dev_pm_ops = {
+static const struct dev_pm_ops hitfb_dev_pm_ops = {
 	.suspend	= hitfb_suspend,
 	.resume		= hitfb_resume,
 };

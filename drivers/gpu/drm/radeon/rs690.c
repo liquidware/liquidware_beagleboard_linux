@@ -129,26 +129,21 @@ void rs690_pm_info(struct radeon_device *rdev)
 	rdev->pm.sideport_bandwidth.full = rfixed_div(rdev->pm.sideport_bandwidth, tmp);
 }
 
-void rs690_vram_info(struct radeon_device *rdev)
+void rs690_mc_init(struct radeon_device *rdev)
 {
-	uint32_t tmp;
 	fixed20_12 a;
+	u64 base;
 
 	rs400_gart_adjust_size(rdev);
-	/* DDR for all card after R300 & IGP */
 	rdev->mc.vram_is_ddr = true;
-	/* FIXME: is this correct for RS690/RS740 ? */
-	tmp = RREG32(RADEON_MEM_CNTL);
-	if (tmp & R300_MEM_NUM_CHANNELS_MASK) {
-		rdev->mc.vram_width = 128;
-	} else {
-		rdev->mc.vram_width = 64;
-	}
+	rdev->mc.vram_width = 128;
 	rdev->mc.real_vram_size = RREG32(RADEON_CONFIG_MEMSIZE);
 	rdev->mc.mc_vram_size = rdev->mc.real_vram_size;
-
 	rdev->mc.aper_base = drm_get_resource_start(rdev->ddev, 0);
 	rdev->mc.aper_size = drm_get_resource_len(rdev->ddev, 0);
+	rdev->mc.visible_vram_size = rdev->mc.aper_size;
+	base = RREG32_MC(R_000100_MCCFG_FB_LOCATION);
+	base = G_000100_MC_FB_START(base) << 16;
 	rs690_pm_info(rdev);
 	/* FIXME: we should enforce default clock in case GPU is not in
 	 * default setup
@@ -159,6 +154,9 @@ void rs690_vram_info(struct radeon_device *rdev)
 	a.full = rfixed_const(16);
 	/* core_bandwidth = sclk(Mhz) * 16 */
 	rdev->pm.core_bandwidth.full = rfixed_div(rdev->pm.sclk, a);
+	rdev->mc.igp_sideport_enabled = radeon_atombios_sideport_present(rdev);
+	radeon_vram_location(rdev, &rdev->mc, base);
+	radeon_gtt_location(rdev, &rdev->mc);
 }
 
 void rs690_line_buffer_adjust(struct radeon_device *rdev,
@@ -244,8 +242,9 @@ void rs690_crtc_bandwidth_compute(struct radeon_device *rdev,
 
 	b.full = rfixed_const(mode->crtc_hdisplay);
 	c.full = rfixed_const(256);
-	a.full = rfixed_mul(wm->num_line_pair, b);
-	request_fifo_depth.full = rfixed_div(a, c);
+	a.full = rfixed_div(b, c);
+	request_fifo_depth.full = rfixed_mul(a, wm->num_line_pair);
+	request_fifo_depth.full = rfixed_ceil(request_fifo_depth);
 	if (a.full < rfixed_const(4)) {
 		wm->lb_request_fifo_depth = 4;
 	} else {
@@ -374,6 +373,7 @@ void rs690_crtc_bandwidth_compute(struct radeon_device *rdev,
 	a.full = rfixed_const(16);
 	wm->priority_mark_max.full = rfixed_const(crtc->base.mode.crtc_hdisplay);
 	wm->priority_mark_max.full = rfixed_div(wm->priority_mark_max, a);
+	wm->priority_mark_max.full = rfixed_ceil(wm->priority_mark_max);
 
 	/* Determine estimated width */
 	estimated_width.full = tolerable_latency.full - wm->worst_case_latency.full;
@@ -383,6 +383,7 @@ void rs690_crtc_bandwidth_compute(struct radeon_device *rdev,
 	} else {
 		a.full = rfixed_const(16);
 		wm->priority_mark.full = rfixed_div(estimated_width, a);
+		wm->priority_mark.full = rfixed_ceil(wm->priority_mark);
 		wm->priority_mark.full = wm->priority_mark_max.full - wm->priority_mark.full;
 	}
 }
@@ -605,8 +606,8 @@ static int rs690_startup(struct radeon_device *rdev)
 	if (r)
 		return r;
 	/* Enable IRQ */
-	rdev->irq.sw_int = true;
 	rs600_irq_set(rdev);
+	rdev->config.r300.hdp_cntl = RREG32(RADEON_HOST_PATH_CNTL);
 	/* 1M ring buffer */
 	r = r100_cp_init(rdev, 1024 * 1024);
 	if (r) {
@@ -640,6 +641,8 @@ int rs690_resume(struct radeon_device *rdev)
 	atom_asic_init(rdev->mode_info.atom_context);
 	/* Resume clock after posting */
 	rv515_clock_startup(rdev);
+	/* Initialize surface registers */
+	radeon_surface_init(rdev);
 	return rs690_startup(rdev);
 }
 
@@ -654,7 +657,6 @@ int rs690_suspend(struct radeon_device *rdev)
 
 void rs690_fini(struct radeon_device *rdev)
 {
-	rs690_suspend(rdev);
 	r100_cp_fini(rdev);
 	r100_wb_fini(rdev);
 	r100_ib_fini(rdev);
@@ -662,7 +664,7 @@ void rs690_fini(struct radeon_device *rdev)
 	rs400_gart_fini(rdev);
 	radeon_irq_kms_fini(rdev);
 	radeon_fence_driver_fini(rdev);
-	radeon_object_fini(rdev);
+	radeon_bo_fini(rdev);
 	radeon_atombios_fini(rdev);
 	kfree(rdev->bios);
 	rdev->bios = NULL;
@@ -700,20 +702,15 @@ int rs690_init(struct radeon_device *rdev)
 			RREG32(R_0007C0_CP_STAT));
 	}
 	/* check if cards are posted or not */
-	if (!radeon_card_posted(rdev) && rdev->bios) {
-		DRM_INFO("GPU not posted. posting now...\n");
-		atom_asic_init(rdev->mode_info.atom_context);
-	}
+	if (radeon_boot_test_post_card(rdev) == false)
+		return -EINVAL;
+
 	/* Initialize clocks */
 	radeon_get_clock_info(rdev->ddev);
 	/* Initialize power management */
 	radeon_pm_init(rdev);
-	/* Get vram informations */
-	rs690_vram_info(rdev);
-	/* Initialize memory controller (also test AGP) */
-	r = r420_mc_init(rdev);
-	if (r)
-		return r;
+	/* initialize memory controller */
+	rs690_mc_init(rdev);
 	rv515_debugfs(rdev);
 	/* Fence driver */
 	r = radeon_fence_driver_init(rdev);
@@ -723,7 +720,7 @@ int rs690_init(struct radeon_device *rdev)
 	if (r)
 		return r;
 	/* Memory manager */
-	r = radeon_object_init(rdev);
+	r = radeon_bo_init(rdev);
 	if (r)
 		return r;
 	r = rs400_gart_init(rdev);
@@ -735,7 +732,6 @@ int rs690_init(struct radeon_device *rdev)
 	if (r) {
 		/* Somethings want wront with the accel init stop accel */
 		dev_err(rdev->dev, "Disabling GPU acceleration\n");
-		rs690_suspend(rdev);
 		r100_cp_fini(rdev);
 		r100_wb_fini(rdev);
 		r100_ib_fini(rdev);

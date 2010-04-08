@@ -35,6 +35,7 @@
  * TODO: Make a more generic struct (eg. add more stuff to ath5k_capabilities)
  * and clean up common bits, then introduce set/get functions in eeprom.c */
 #include "eeprom.h"
+#include "../ath.h"
 
 /* PCI IDs */
 #define PCI_DEVICE_ID_ATHEROS_AR5210 		0x0007 /* AR5210 */
@@ -165,13 +166,6 @@
 #define AR5K_INI_VAL_XR			0
 #define AR5K_INI_VAL_MAX		5
 
-/* Used for BSSID etc manipulation */
-#define AR5K_LOW_ID(_a)(				\
-(_a)[0] | (_a)[1] << 8 | (_a)[2] << 16 | (_a)[3] << 24	\
-)
-
-#define AR5K_HIGH_ID(_a)	((_a)[4] | (_a)[5] << 8)
-
 /*
  * Some tuneable values (these should be changeable by the user)
  * TODO: Make use of them and add more options OR use debug/configfs
@@ -204,6 +198,7 @@
 #define AR5K_TUNE_CWMAX_11B			1023
 #define AR5K_TUNE_CWMAX_XR			7
 #define AR5K_TUNE_NOISE_FLOOR			-72
+#define AR5K_TUNE_CCA_MAX_GOOD_VALUE		-95
 #define AR5K_TUNE_MAX_TXPOWER			63
 #define AR5K_TUNE_DEFAULT_TXPOWER		25
 #define AR5K_TUNE_TPC_TXPOWER			false
@@ -540,13 +535,12 @@ struct ath5k_txq_info {
 	u32	tqi_cbr_period; /* Constant bit rate period */
 	u32	tqi_cbr_overflow_limit;
 	u32	tqi_burst_time;
-	u32	tqi_ready_time; /* Not used */
+	u32	tqi_ready_time; /* Time queue waits after an event */
 };
 
 /*
  * Transmit packet types.
  * used on tx control descriptor
- * TODO: Use them inside base.c corectly
  */
 enum ath5k_pkt_type {
 	AR5K_PKT_TYPE_NORMAL		= 0,
@@ -1012,6 +1006,14 @@ struct ath5k_capabilities {
 	} cap_queues;
 };
 
+/* size of noise floor history (keep it a power of two) */
+#define ATH5K_NF_CAL_HIST_MAX	8
+struct ath5k_nfcal_hist
+{
+	s16 index;				/* current index into nfval */
+	s16 nfval[ATH5K_NF_CAL_HIST_MAX];	/* last few noise floors */
+};
+
 
 /***************************************\
   HARDWARE ABSTRACTION LAYER STRUCTURE
@@ -1027,6 +1029,7 @@ struct ath5k_capabilities {
 /* TODO: Clean up and merge with ath5k_softc */
 struct ath5k_hw {
 	u32			ah_magic;
+	struct ath_common       common;
 
 	struct ath5k_softc	*ah_sc;
 	void __iomem		*ah_iobase;
@@ -1059,6 +1062,7 @@ struct ath5k_hw {
 	u32			ah_cw_min;
 	u32			ah_cw_max;
 	u32			ah_limit_tx_retries;
+	u8			ah_coverage_class;
 
 	/* Antenna Control */
 	u32			ah_ant_ctl[AR5K_EEPROM_N_MODES][AR5K_ANT_MAX];
@@ -1066,14 +1070,6 @@ struct ath5k_hw {
 	u8			ah_tx_ant;
 	u8			ah_def_ant;
 	bool			ah_software_retry;
-
-	u8			ah_sta_id[ETH_ALEN];
-
-	/* Current BSSID we are trying to assoc to / create.
-	 * This is passed by mac80211 on config_interface() and cached here for
-	 * use in resets */
-	u8			ah_bssid[ETH_ALEN];
-	u8			ah_bssid_mask[ETH_ALEN];
 
 	int			ah_gpio_npins;
 
@@ -1125,6 +1121,8 @@ struct ath5k_hw {
 		struct ieee80211_channel r_last_channel;
 	} ah_radar;
 
+	struct ath5k_nfcal_hist ah_nfcal_hist;
+
 	/* noise floor from last periodic calibration */
 	s32			ah_noise_floor;
 
@@ -1160,7 +1158,7 @@ struct ath5k_hw {
  */
 
 /* Attach/Detach Functions */
-extern struct ath5k_hw *ath5k_hw_attach(struct ath5k_softc *sc);
+extern int ath5k_hw_attach(struct ath5k_softc *sc);
 extern void ath5k_hw_detach(struct ath5k_hw *ah);
 
 /* LED functions */
@@ -1202,11 +1200,11 @@ extern bool ath5k_eeprom_is_hb63(struct ath5k_hw *ah);
 
 /* Protocol Control Unit Functions */
 extern int ath5k_hw_set_opmode(struct ath5k_hw *ah);
+extern void ath5k_hw_set_coverage_class(struct ath5k_hw *ah, u8 coverage_class);
 /* BSSID Functions */
-extern void ath5k_hw_get_lladdr(struct ath5k_hw *ah, u8 *mac);
 extern int ath5k_hw_set_lladdr(struct ath5k_hw *ah, const u8 *mac);
-extern void ath5k_hw_set_associd(struct ath5k_hw *ah, const u8 *bssid, u16 assoc_id);
-extern int ath5k_hw_set_bssid_mask(struct ath5k_hw *ah, const u8 *mask);
+extern void ath5k_hw_set_associd(struct ath5k_hw *ah);
+extern void ath5k_hw_set_bssid_mask(struct ath5k_hw *ah, const u8 *mask);
 /* Receive start/stop functions */
 extern void ath5k_hw_start_rx_pcu(struct ath5k_hw *ah);
 extern void ath5k_hw_stop_rx_pcu(struct ath5k_hw *ah);
@@ -1234,6 +1232,10 @@ extern int ath5k_hw_set_ack_timeout(struct ath5k_hw *ah, unsigned int timeout);
 extern unsigned int ath5k_hw_get_ack_timeout(struct ath5k_hw *ah);
 extern int ath5k_hw_set_cts_timeout(struct ath5k_hw *ah, unsigned int timeout);
 extern unsigned int ath5k_hw_get_cts_timeout(struct ath5k_hw *ah);
+/* Clock rate related functions */
+unsigned int ath5k_hw_htoclock(struct ath5k_hw *ah, unsigned int usec);
+unsigned int ath5k_hw_clocktoh(struct ath5k_hw *ah, unsigned int clock);
+unsigned int ath5k_hw_get_clockrate(struct ath5k_hw *ah);
 /* Key table (WEP) functions */
 extern int ath5k_hw_reset_key(struct ath5k_hw *ah, u16 entry);
 extern int ath5k_hw_is_key_valid(struct ath5k_hw *ah, u16 entry);
@@ -1288,8 +1290,10 @@ extern int ath5k_hw_rfgain_opt_init(struct ath5k_hw *ah);
 extern bool ath5k_channel_ok(struct ath5k_hw *ah, u16 freq, unsigned int flags);
 extern int ath5k_hw_channel(struct ath5k_hw *ah, struct ieee80211_channel *channel);
 /* PHY calibration */
+void ath5k_hw_init_nfcal_hist(struct ath5k_hw *ah);
 extern int ath5k_hw_phy_calibrate(struct ath5k_hw *ah, struct ieee80211_channel *channel);
 extern int ath5k_hw_noise_floor_calibration(struct ath5k_hw *ah, short freq);
+extern s16 ath5k_hw_get_noise_floor(struct ath5k_hw *ah);
 extern void ath5k_hw_calibration_poll(struct ath5k_hw *ah);
 /* Spur mitigation */
 bool ath5k_hw_chan_has_spur_noise(struct ath5k_hw *ah,
@@ -1311,35 +1315,21 @@ extern int ath5k_hw_set_txpower_limit(struct ath5k_hw *ah, u8 txpower);
  * Functions used internaly
  */
 
-/*
- * Translate usec to hw clock units
- * TODO: Half/quarter rate
- */
-static inline unsigned int ath5k_hw_htoclock(unsigned int usec, bool turbo)
+static inline struct ath_common *ath5k_hw_common(struct ath5k_hw *ah)
 {
-	return turbo ? (usec * 80) : (usec * 40);
+        return &ah->common;
 }
 
-/*
- * Translate hw clock units to usec
- * TODO: Half/quarter rate
- */
-static inline unsigned int ath5k_hw_clocktoh(unsigned int clock, bool turbo)
+static inline struct ath_regulatory *ath5k_hw_regulatory(struct ath5k_hw *ah)
 {
-	return turbo ? (clock / 80) : (clock / 40);
+        return &(ath5k_hw_common(ah)->regulatory);
 }
 
-/*
- * Read from a register
- */
 static inline u32 ath5k_hw_reg_read(struct ath5k_hw *ah, u16 reg)
 {
 	return ioread32(ah->ah_iobase + reg);
 }
 
-/*
- * Write to a register
- */
 static inline void ath5k_hw_reg_write(struct ath5k_hw *ah, u32 val, u16 reg)
 {
 	iowrite32(val, ah->ah_iobase + reg);

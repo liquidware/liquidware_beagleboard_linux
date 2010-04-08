@@ -618,14 +618,15 @@ void __irq_entry do_IRQ(struct pt_regs *regs)
 	old_regs = set_irq_regs(regs);
 	s390_idle_check();
 	irq_enter();
+	__get_cpu_var(s390_idle).nohz_delay = 1;
 	if (S390_lowcore.int_clock >= S390_lowcore.clock_comparator)
 		/* Serve timer interrupts first. */
 		clock_comparator_work();
 	/*
 	 * Get interrupt information from lowcore
 	 */
-	tpi_info = (struct tpi_info *) __LC_SUBCHANNEL_ID;
-	irb = (struct irb *) __LC_IRB;
+	tpi_info = (struct tpi_info *)&S390_lowcore.subchannel_id;
+	irb = (struct irb *)&S390_lowcore.irb;
 	do {
 		kstat_cpu(smp_processor_id()).irqs[IO_INTERRUPT]++;
 		/*
@@ -660,7 +661,7 @@ void __irq_entry do_IRQ(struct pt_regs *regs)
 		 * We don't do this for VM because a tpi drops the cpu
 		 * out of the sie which costs more cycles than it saves.
 		 */
-	} while (!MACHINE_IS_VM && tpi (NULL) != 0);
+	} while (MACHINE_IS_LPAR && tpi(NULL) != 0);
 	irq_exit();
 	set_irq_regs(old_regs);
 }
@@ -681,10 +682,10 @@ static int cio_tpi(void)
 	struct irb *irb;
 	int irq_context;
 
-	tpi_info = (struct tpi_info *) __LC_SUBCHANNEL_ID;
+	tpi_info = (struct tpi_info *)&S390_lowcore.subchannel_id;
 	if (tpi(NULL) != 1)
 		return 0;
-	irb = (struct irb *) __LC_IRB;
+	irb = (struct irb *)&S390_lowcore.irb;
 	/* Store interrupt response block to lowcore. */
 	if (tsch(tpi_info->schid, irb) != 0)
 		/* Not status pending or not operational. */
@@ -884,7 +885,7 @@ __clear_io_subchannel_easy(struct subchannel_id schid)
 		struct tpi_info ti;
 
 		if (tpi(&ti)) {
-			tsch(ti.schid, (struct irb *)__LC_IRB);
+			tsch(ti.schid, (struct irb *)&S390_lowcore.irb);
 			if (schid_equal(&ti.schid, &schid))
 				return 0;
 		}
@@ -1082,7 +1083,7 @@ int __init cio_get_iplinfo(struct cio_iplinfo *iplinfo)
 	struct subchannel_id schid;
 	struct schib schib;
 
-	schid = *(struct subchannel_id *)__LC_SUBCHANNEL_ID;
+	schid = *(struct subchannel_id *)&S390_lowcore.subchannel_id;
 	if (!schid.one)
 		return -ENODEV;
 	if (stsch(schid, &schib))

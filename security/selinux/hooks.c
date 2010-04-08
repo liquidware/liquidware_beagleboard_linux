@@ -76,6 +76,7 @@
 #include <linux/selinux.h>
 #include <linux/mutex.h>
 #include <linux/posix-timers.h>
+#include <linux/syslog.h>
 
 #include "avc.h"
 #include "objsec.h"
@@ -91,7 +92,6 @@
 
 #define NUM_SEL_MNT_OPTS 5
 
-extern unsigned int policydb_loaded_version;
 extern int selinux_nlmsg_lookup(u16 sclass, u16 nlmsg_type, u32 *perm);
 extern struct security_operations *security_ops;
 
@@ -125,13 +125,6 @@ __setup("selinux=", selinux_enabled_setup);
 #else
 int selinux_enabled = 1;
 #endif
-
-
-/*
- * Minimal support for a secondary security module,
- * just to allow the use of the capability module.
- */
-static struct security_operations *secondary_ops;
 
 /* Lists of inode and superblock security structures initialized
    before the policy was loaded. */
@@ -2050,29 +2043,30 @@ static int selinux_quota_on(struct dentry *dentry)
 	return dentry_has_perm(cred, NULL, dentry, FILE__QUOTAON);
 }
 
-static int selinux_syslog(int type)
+static int selinux_syslog(int type, bool from_file)
 {
 	int rc;
 
-	rc = cap_syslog(type);
+	rc = cap_syslog(type, from_file);
 	if (rc)
 		return rc;
 
 	switch (type) {
-	case 3:		/* Read last kernel messages */
-	case 10:	/* Return size of the log buffer */
+	case SYSLOG_ACTION_READ_ALL:	/* Read last kernel messages */
+	case SYSLOG_ACTION_SIZE_BUFFER:	/* Return size of the log buffer */
 		rc = task_has_system(current, SYSTEM__SYSLOG_READ);
 		break;
-	case 6:		/* Disable logging to console */
-	case 7:		/* Enable logging to console */
-	case 8:		/* Set level of messages printed to console */
+	case SYSLOG_ACTION_CONSOLE_OFF:	/* Disable logging to console */
+	case SYSLOG_ACTION_CONSOLE_ON:	/* Enable logging to console */
+	/* Set level of messages printed to console */
+	case SYSLOG_ACTION_CONSOLE_LEVEL:
 		rc = task_has_system(current, SYSTEM__SYSLOG_CONSOLE);
 		break;
-	case 0:		/* Close log */
-	case 1:		/* Open log */
-	case 2:		/* Read from log */
-	case 4:		/* Read/clear last kernel messages */
-	case 5:		/* Clear ring buffer */
+	case SYSLOG_ACTION_CLOSE:	/* Close log */
+	case SYSLOG_ACTION_OPEN:	/* Open log */
+	case SYSLOG_ACTION_READ:	/* Read from log */
+	case SYSLOG_ACTION_READ_CLEAR:	/* Read/clear last kernel messages */
+	case SYSLOG_ACTION_CLEAR:	/* Clear ring buffer */
 	default:
 		rc = task_has_system(current, SYSTEM__SYSLOG_MOD);
 		break;
@@ -2366,7 +2360,7 @@ static void selinux_bprm_committing_creds(struct linux_binprm *bprm)
 			initrlim = init_task.signal->rlim + i;
 			rlim->rlim_cur = min(rlim->rlim_max, initrlim->rlim_cur);
 		}
-		update_rlimit_cpu(rlim->rlim_cur);
+		update_rlimit_cpu(current->signal->rlim[RLIMIT_CPU].rlim_cur);
 	}
 }
 
@@ -3335,12 +3329,21 @@ static int selinux_kernel_create_files_as(struct cred *new, struct inode *inode)
 
 	if (ret == 0)
 		tsec->create_sid = isec->sid;
-	return 0;
+	return ret;
 }
 
-static int selinux_kernel_module_request(void)
+static int selinux_kernel_module_request(char *kmod_name)
 {
-	return task_has_system(current, SYSTEM__MODULE_REQUEST);
+	u32 sid;
+	struct common_audit_data ad;
+
+	sid = task_sid(current);
+
+	COMMON_AUDIT_DATA_INIT(&ad, KMOD);
+	ad.u.kmod_name = kmod_name;
+
+	return avc_has_perm(sid, SECINITSID_KERNEL, SECCLASS_SYSTEM,
+			    SYSTEM__MODULE_REQUEST, &ad);
 }
 
 static int selinux_task_setpgid(struct task_struct *p, pid_t pgid)
@@ -4085,7 +4088,7 @@ static int selinux_sock_rcv_skb_compat(struct sock *sk, struct sk_buff *skb,
 	char *addrp;
 
 	COMMON_AUDIT_DATA_INIT(&ad, NET);
-	ad.u.net.netif = skb->iif;
+	ad.u.net.netif = skb->skb_iif;
 	ad.u.net.family = family;
 	err = selinux_parse_skb(skb, &ad, &addrp, 1, NULL);
 	if (err)
@@ -4147,7 +4150,7 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 		return 0;
 
 	COMMON_AUDIT_DATA_INIT(&ad, NET);
-	ad.u.net.netif = skb->iif;
+	ad.u.net.netif = skb->skb_iif;
 	ad.u.net.family = family;
 	err = selinux_parse_skb(skb, &ad, &addrp, 1, NULL);
 	if (err)
@@ -4159,7 +4162,7 @@ static int selinux_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 		err = selinux_skb_peerlbl_sid(skb, family, &peer_sid);
 		if (err)
 			return err;
-		err = selinux_inet_sys_rcv_skb(skb->iif, addrp, family,
+		err = selinux_inet_sys_rcv_skb(skb->skb_iif, addrp, family,
 					       peer_sid, &ad);
 		if (err) {
 			selinux_netlbl_err(skb, err, 0);
@@ -4714,10 +4717,7 @@ static int selinux_netlink_send(struct sock *sk, struct sk_buff *skb)
 	if (err)
 		return err;
 
-	if (policydb_loaded_version >= POLICYDB_VERSION_NLCLASS)
-		err = selinux_nlmsg_perm(sk, skb);
-
-	return err;
+	return selinux_nlmsg_perm(sk, skb);
 }
 
 static int selinux_netlink_recv(struct sk_buff *skb, int capability)
@@ -5667,9 +5667,6 @@ static __init int selinux_init(void)
 					    0, SLAB_PANIC, NULL);
 	avc_init();
 
-	secondary_ops = security_ops;
-	if (!secondary_ops)
-		panic("SELinux: No initial security operations\n");
 	if (register_security(&selinux_ops))
 		panic("SELinux: Unable to register with kernel.\n");
 
@@ -5830,11 +5827,10 @@ int selinux_disable(void)
 	selinux_disabled = 1;
 	selinux_enabled = 0;
 
+	reset_security_ops();
+
 	/* Try to destroy the avc node cache */
 	avc_disable();
-
-	/* Reset security_ops to the secondary module, dummy or capability. */
-	security_ops = secondary_ops;
 
 	/* Unregister netfilter hooks. */
 	selinux_nf_ip_exit();

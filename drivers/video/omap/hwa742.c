@@ -25,6 +25,7 @@
 #include <linux/fb.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
+#include <linux/interrupt.h>
 
 #include <plat/dma.h>
 #include <plat/hwa742.h>

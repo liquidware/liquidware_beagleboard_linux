@@ -114,8 +114,8 @@ static struct platform_device *tahvo_otg_dev;
 
 static irqreturn_t omap_otg_irq(int irq, void *arg)
 {
-	struct platform_device *otg_dev = (struct platform_device *) arg;
-	struct tahvo_usb *tu = (struct tahvo_usb *) otg_dev->dev.driver_data;
+	struct platform_device *otg_dev = arg;
+	struct tahvo_usb *tu = platform_get_drvdata(otg_dev);
 	u16 otg_irq;
 
 	otg_irq = omap_readw(OTG_IRQ_SRC);
@@ -132,12 +132,14 @@ static irqreturn_t omap_otg_irq(int irq, void *arg)
 	} else if (otg_irq & A_VBUS_ERR) {
 		omap_writew(A_VBUS_ERR, OTG_IRQ_SRC);
 	} else if (otg_irq & DRIVER_SWITCH) {
+#ifdef CONFIG_USB_OTG
 		if ((!(omap_readl(OTG_CTRL) & OTG_DRIVER_SEL)) &&
 		   tu->otg.host && tu->otg.state == OTG_STATE_A_HOST) {
 			/* role is host */
 			usb_bus_start_enum(tu->otg.host,
 					   tu->otg.host->otg_port);
 		}
+#endif
 		omap_writew(DRIVER_SWITCH, OTG_IRQ_SRC);
 	} else
 		return IRQ_NONE;
@@ -227,7 +229,7 @@ struct device_driver omap_otg_driver = {
 static ssize_t vbus_state_show(struct device *device,
 			       struct device_attribute *attr, char *buf)
 {
-	struct tahvo_usb *tu = (struct tahvo_usb*) device->driver_data;
+	struct tahvo_usb *tu = dev_get_drvdata(device);
 	return sprintf(buf, "%d\n", tu->vbus_state);
 }
 static DEVICE_ATTR(vbus_state, 0444, vbus_state_show, NULL);
@@ -590,7 +592,7 @@ static void tahvo_usb_vbus_interrupt(unsigned long arg)
 static ssize_t otg_mode_show(struct device *device,
 			     struct device_attribute *attr, char *buf)
 {
-	struct tahvo_usb *tu = (struct tahvo_usb*) device->driver_data;
+	struct tahvo_usb *tu = dev_get_drvdata(device);
 	switch (tu->tahvo_mode) {
 	case TAHVO_MODE_HOST:
 		return sprintf(buf, "host\n");
@@ -604,7 +606,7 @@ static ssize_t otg_mode_store(struct device *device,
 			      struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
-	struct tahvo_usb *tu = (struct tahvo_usb*) device->driver_data;
+	struct tahvo_usb *tu = dev_get_drvdata(device);
 	int r;
 
 	r = strlen(buf);
@@ -645,6 +647,10 @@ static int tahvo_usb_probe(struct device *dev)
 {
 	struct tahvo_usb *tu;
 	int ret;
+
+	ret = tahvo_get_status();
+	if (!ret)
+		return -ENODEV;
 
 	dev_dbg(dev, "probe\n");
 
@@ -706,7 +712,7 @@ static int tahvo_usb_probe(struct device *dev)
 		return ret;
 	}
 
-	dev->driver_data = tu;
+	dev_set_drvdata(dev, tu);
 
 	/* Act upon current vbus state once at startup. A vbus state irq may or
 	 * may not be generated in addition to this. */

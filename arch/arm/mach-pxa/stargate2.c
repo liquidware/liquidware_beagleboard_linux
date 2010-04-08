@@ -760,10 +760,9 @@ static void __init stargate2_init(void)
 
 	pxa2xx_mfp_config(ARRAY_AND_SIZE(stargate2_pin_config));
 
-	/* spi chip selects */
-	gpio_direction_output(37, 0);
-	gpio_direction_output(24, 0);
-	gpio_direction_output(39, 0);
+	pxa_set_ffuart_info(NULL);
+	pxa_set_btuart_info(NULL);
+	pxa_set_stuart_info(NULL);
 
 	platform_add_devices(ARRAY_AND_SIZE(stargate2_devices));
 

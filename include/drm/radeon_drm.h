@@ -33,7 +33,7 @@
 #ifndef __RADEON_DRM_H__
 #define __RADEON_DRM_H__
 
-#include <linux/types.h>
+#include "drm.h"
 
 /* WARNING: If you change any of these defines, make sure to change the
  * defines in the X server file (radeon_sarea.h)
@@ -808,6 +808,7 @@ struct drm_radeon_gem_create {
 #define RADEON_TILING_SWAP_32BIT  0x8
 #define RADEON_TILING_SURFACE     0x10 /* this object requires a surface
 					* when mapped - i.e. front buffer */
+#define RADEON_TILING_MICRO_SQUARE 0x20
 
 struct drm_radeon_gem_set_tiling {
 	uint32_t	handle;

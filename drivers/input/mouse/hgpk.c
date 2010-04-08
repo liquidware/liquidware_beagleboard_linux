@@ -68,10 +68,6 @@ module_param(post_interrupt_delay, int, 0644);
 MODULE_PARM_DESC(post_interrupt_delay,
 	"delay (ms) before recal after recal interrupt detected");
 
-static int autorecal = 1;
-module_param(autorecal, int, 0644);
-MODULE_PARM_DESC(autorecal, "enable recalibration in the driver");
-
 /*
  * When the touchpad gets ultra-sensitive, one can keep their finger 1/2"
  * above the pad and still have it send packets.  This causes a jump cursor
@@ -427,21 +423,7 @@ static void hgpk_recalib_work(struct work_struct *work)
 
 static int hgpk_register(struct psmouse *psmouse)
 {
-	struct input_dev *dev = psmouse->dev;
 	int err;
-
-	/* unset the things that psmouse-base sets which we don't have */
-	__clear_bit(BTN_MIDDLE, dev->keybit);
-
-	/* set the things we do have */
-	__set_bit(EV_KEY, dev->evbit);
-	__set_bit(EV_REL, dev->evbit);
-
-	__set_bit(REL_X, dev->relbit);
-	__set_bit(REL_Y, dev->relbit);
-
-	__set_bit(BTN_LEFT, dev->keybit);
-	__set_bit(BTN_RIGHT, dev->keybit);
 
 	/* register handlers */
 	psmouse->protocol_handler = hgpk_process_byte;

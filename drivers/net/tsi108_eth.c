@@ -802,12 +802,10 @@ static int tsi108_refill_rx(struct net_device *dev, int budget)
 		int rx = data->rxhead;
 		struct sk_buff *skb;
 
-		data->rxskbs[rx] = skb = netdev_alloc_skb(dev,
-							  TSI108_RXBUF_SIZE + 2);
+		skb = netdev_alloc_skb_ip_align(dev, TSI108_RXBUF_SIZE);
+		data->rxskbs[rx] = skb;
 		if (!skb)
 			break;
-
-		skb_reserve(skb, 2); /* Align the data on a 4-byte boundary. */
 
 		data->rxring[rx].buf0 = dma_map_single(NULL, skb->data,
 							TSI108_RX_SKB_SIZE,
@@ -1186,29 +1184,19 @@ static void tsi108_set_rx_mode(struct net_device *dev)
 
 	rxcfg &= ~(TSI108_EC_RXCFG_UFE | TSI108_EC_RXCFG_MFE);
 
-	if (dev->flags & IFF_ALLMULTI || dev->mc_count) {
+	if (dev->flags & IFF_ALLMULTI || !netdev_mc_empty(dev)) {
 		int i;
-		struct dev_mc_list *mc = dev->mc_list;
+		struct dev_mc_list *mc;
 		rxcfg |= TSI108_EC_RXCFG_MFE | TSI108_EC_RXCFG_MC_HASH;
 
 		memset(data->mc_hash, 0, sizeof(data->mc_hash));
 
-		while (mc) {
+		netdev_for_each_mc_addr(mc, dev) {
 			u32 hash, crc;
 
-			if (mc->dmi_addrlen == 6) {
-				crc = ether_crc(6, mc->dmi_addr);
-				hash = crc >> 23;
-
-				__set_bit(hash, &data->mc_hash[0]);
-			} else {
-				printk(KERN_ERR
-		"%s: got multicast address of length %d instead of 6.\n",
-				       dev->name,
-				       mc->dmi_addrlen);
-			}
-
-			mc = mc->next;
+			crc = ether_crc(6, mc->dmi_addr);
+			hash = crc >> 23;
+			__set_bit(hash, &data->mc_hash[0]);
 		}
 
 		TSI_WRITE(TSI108_EC_HASHADDR,
@@ -1356,7 +1344,7 @@ static int tsi108_open(struct net_device *dev)
 	for (i = 0; i < TSI108_RXRING_LEN; i++) {
 		struct sk_buff *skb;
 
-		skb = netdev_alloc_skb(dev, TSI108_RXBUF_SIZE + NET_IP_ALIGN);
+		skb = netdev_alloc_skb_ip_align(dev, TSI108_RXBUF_SIZE);
 		if (!skb) {
 			/* Bah.  No memory for now, but maybe we'll get
 			 * some more later.
@@ -1370,8 +1358,6 @@ static int tsi108_open(struct net_device *dev)
 		}
 
 		data->rxskbs[i] = skb;
-		/* Align the payload on a 4-byte boundary */
-		skb_reserve(skb, 2);
 		data->rxskbs[i] = skb;
 		data->rxring[i].buf0 = virt_to_phys(data->rxskbs[i]->data);
 		data->rxring[i].misc = TSI108_RX_OWN | TSI108_RX_INT;

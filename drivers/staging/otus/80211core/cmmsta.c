@@ -216,7 +216,7 @@ void zfStaConnectFail(zdev_t* dev, u16_t reason, u16_t* bssid, u8_t weight)
     /* Change internal state */
     zfChangeAdapterState(dev, ZM_STA_STATE_DISCONNECT);
 
-    /* Improve WEP/TKIP performace with HT AP, detail information please look bug#32495 */
+    /* Improve WEP/TKIP performance with HT AP, detail information please look bug#32495 */
     //zfHpSetTTSIFSTime(dev, 0x8);
 
     /* Notify wrapper of connection status changes */
@@ -2808,7 +2808,7 @@ void zfStaProcessProbeReq(zdev_t* dev, zbuf_t* buf, u16_t* src)
     zmw_get_wlan_dev(dev);
 
     /* check mode : AP/IBSS */
-    if ((wd->wlanMode != ZM_MODE_AP) || (wd->wlanMode != ZM_MODE_IBSS))
+    if ((wd->wlanMode != ZM_MODE_AP) && (wd->wlanMode != ZM_MODE_IBSS))
     {
         zm_msg0_mm(ZM_LV_3, "Ignore probe req");
         return;
@@ -4148,7 +4148,7 @@ void zfInfraConnectNetwork(zdev_t* dev)
             wd->sta.bIsSharedKey = 0;
         }
 
-        /* Improve WEP/TKIP performace with HT AP, detail information please look bug#32495 */
+        /* Improve WEP/TKIP performance with HT AP, detail information please look bug#32495 */
         /*
         if ( (pBssInfo->broadcomHTAp == 1)
              && (wd->sta.SWEncryptEnable != 0) )
@@ -4848,8 +4848,6 @@ u16_t zfStaAddIePowerCap(zdev_t* dev, zbuf_t* buf, u16_t offset)
     u8_t MaxTxPower;
     u8_t MinTxPower;
 
-    zmw_get_wlan_dev(dev);
-
     /* Element ID */
     zmw_tx_buf_writeb(dev, buf, offset++, ZM_WLAN_EID_POWER_CAPABILITY);
 
@@ -5276,7 +5274,6 @@ u16_t zfStaRxValidateFrame(zdev_t* dev, zbuf_t* buf)
     u8_t   da0;
     //u16_t  sa[3];
     u16_t  ret;
-    u16_t  i;
     //u8_t    sa0;
 
     zmw_get_wlan_dev(dev);
@@ -5737,8 +5734,6 @@ u16_t zfComputeBssInfoWeightValue(zdev_t *dev, u8_t isBMode, u8_t isHT, u8_t isH
 	u8_t  weightOfN20UpThr    = 30;
 	u8_t  weightOfN40BelowThr = 16;
 	u8_t  weightOfN40UpThr    = 32;
-
-    zmw_get_wlan_dev(dev);
 
     if( isBMode == 0 )
         return (signalStrength + weightOfB);    // pure b mode , do not add the weight value for this AP !

@@ -194,12 +194,15 @@ static inline u16 ar9170_get_seq(struct sk_buff *skb)
 	return ar9170_get_seq_h((void *) txc->frame_data);
 }
 
+static inline u16 ar9170_get_tid_h(struct ieee80211_hdr *hdr)
+{
+	return (ieee80211_get_qos_ctl(hdr))[0] & IEEE80211_QOS_CTL_TID_MASK;
+}
+
 static inline u16 ar9170_get_tid(struct sk_buff *skb)
 {
 	struct ar9170_tx_control *txc = (void *) skb->data;
-	struct ieee80211_hdr *hdr = (void *) txc->frame_data;
-
-	return (ieee80211_get_qos_ctl(hdr))[0] & IEEE80211_QOS_CTL_TID_MASK;
+	return ar9170_get_tid_h((struct ieee80211_hdr *) txc->frame_data);
 }
 
 #define GET_NEXT_SEQ(seq)	((seq + 1) & 0x0fff)
@@ -213,10 +216,10 @@ static void ar9170_print_txheader(struct ar9170 *ar, struct sk_buff *skb)
 	struct ar9170_tx_info *arinfo = (void *) txinfo->rate_driver_data;
 	struct ieee80211_hdr *hdr = (void *) txc->frame_data;
 
-	printk(KERN_DEBUG "%s: => FRAME [skb:%p, q:%d, DA:[%pM] flags:%x s:%d "
+	printk(KERN_DEBUG "%s: => FRAME [skb:%p, q:%d, DA:[%pM] s:%d "
 			  "mac_ctrl:%04x, phy_ctrl:%08x, timeout:[%d ms]]\n",
 	       wiphy_name(ar->hw->wiphy), skb, skb_get_queue_mapping(skb),
-	       ieee80211_get_DA(hdr), arinfo->flags, ar9170_get_seq_h(hdr),
+	       ieee80211_get_DA(hdr), ar9170_get_seq_h(hdr),
 	       le16_to_cpu(txc->mac_control), le32_to_cpu(txc->phy_control),
 	       jiffies_to_msecs(arinfo->timeout - jiffies));
 }
@@ -391,7 +394,7 @@ static void ar9170_tx_fake_ampdu_status(struct ar9170 *ar)
 		ieee80211_tx_status_irqsafe(ar->hw, skb);
 	}
 
-	for_each_bit(i, &queue_bitmap, BITS_PER_BYTE) {
+	for_each_set_bit(i, &queue_bitmap, BITS_PER_BYTE) {
 #ifdef AR9170_QUEUE_STOP_DEBUG
 		printk(KERN_DEBUG "%s: wake queue %d\n",
 		       wiphy_name(ar->hw->wiphy), i);
@@ -414,9 +417,9 @@ static void ar9170_tx_ampdu_callback(struct ar9170 *ar, struct sk_buff *skb)
 
 	skb_queue_tail(&ar->tx_status_ampdu, skb);
 	ar9170_tx_fake_ampdu_status(ar);
-	ar->tx_ampdu_pending--;
 
-	if (!list_empty(&ar->tx_ampdu_list) && !ar->tx_ampdu_pending)
+	if (atomic_dec_and_test(&ar->tx_ampdu_pending) &&
+	    !list_empty(&ar->tx_ampdu_list))
 		ar9170_tx_ampdu(ar);
 }
 
@@ -430,7 +433,7 @@ void ar9170_tx_callback(struct ar9170 *ar, struct sk_buff *skb)
 	spin_lock_irqsave(&ar->tx_stats_lock, flags);
 	ar->tx_stats[queue].len--;
 
-	if (skb_queue_empty(&ar->tx_pending[queue])) {
+	if (ar->tx_stats[queue].len < AR9170_NUM_TX_LIMIT_SOFT) {
 #ifdef AR9170_QUEUE_STOP_DEBUG
 		printk(KERN_DEBUG "%s: wake queue %d\n",
 		       wiphy_name(ar->hw->wiphy), queue);
@@ -440,22 +443,17 @@ void ar9170_tx_callback(struct ar9170 *ar, struct sk_buff *skb)
 	}
 	spin_unlock_irqrestore(&ar->tx_stats_lock, flags);
 
-	if (arinfo->flags & AR9170_TX_FLAG_BLOCK_ACK) {
-		ar9170_tx_ampdu_callback(ar, skb);
-	} else if (arinfo->flags & AR9170_TX_FLAG_WAIT_FOR_ACK) {
-		arinfo->timeout = jiffies +
-				  msecs_to_jiffies(AR9170_TX_TIMEOUT);
-
-		skb_queue_tail(&ar->tx_status[queue], skb);
-	} else if (arinfo->flags & AR9170_TX_FLAG_NO_ACK) {
+	if (info->flags & IEEE80211_TX_CTL_NO_ACK) {
 		ar9170_tx_status(ar, skb, AR9170_TX_STATUS_FAILED);
 	} else {
-#ifdef AR9170_QUEUE_DEBUG
-		printk(KERN_DEBUG "%s: unsupported frame flags!\n",
-		       wiphy_name(ar->hw->wiphy));
-		ar9170_print_txheader(ar, skb);
-#endif /* AR9170_QUEUE_DEBUG */
-		dev_kfree_skb_any(skb);
+		if (info->flags & IEEE80211_TX_CTL_AMPDU) {
+			ar9170_tx_ampdu_callback(ar, skb);
+		} else {
+			arinfo->timeout = jiffies +
+				  msecs_to_jiffies(AR9170_TX_TIMEOUT);
+
+			skb_queue_tail(&ar->tx_status[queue], skb);
+		}
 	}
 
 	if (!ar->tx_stats[queue].len &&
@@ -850,6 +848,7 @@ static int ar9170_rx_mac_status(struct ar9170 *ar,
 		}
 		break;
 
+	case AR9170_RX_STATUS_MODULATION_DUPOFDM:
 	case AR9170_RX_STATUS_MODULATION_OFDM:
 		switch (head->plcp[0] & 0xf) {
 		case 0xb:
@@ -897,8 +896,7 @@ static int ar9170_rx_mac_status(struct ar9170 *ar,
 		status->flag |= RX_FLAG_HT;
 		break;
 
-	case AR9170_RX_STATUS_MODULATION_DUPOFDM:
-		/* XXX */
+	default:
 		if (ar9170_nag_limiter(ar))
 			printk(KERN_ERR "%s: invalid modulation\n",
 			       wiphy_name(ar->hw->wiphy));
@@ -1248,6 +1246,7 @@ static int ar9170_op_start(struct ieee80211_hw *hw)
 	ar->global_ampdu_density = 6;
 	ar->global_ampdu_factor = 3;
 
+	atomic_set(&ar->tx_ampdu_pending, 0);
 	ar->bad_hw_nagger = jiffies;
 
 	err = ar->open(ar);
@@ -1406,17 +1405,6 @@ static int ar9170_tx_prepare(struct ar9170 *ar, struct sk_buff *skb)
 
 	if (!(info->flags & IEEE80211_TX_CTL_NO_ACK) &&
 	     (is_valid_ether_addr(ieee80211_get_DA(hdr)))) {
-		if (info->flags & IEEE80211_TX_CTL_AMPDU) {
-			if (unlikely(!info->control.sta))
-				goto err_out;
-
-			txc->mac_control |= cpu_to_le16(AR9170_TX_MAC_AGGR);
-			arinfo->flags = AR9170_TX_FLAG_BLOCK_ACK;
-
-			goto out;
-		}
-
-		txc->mac_control |= cpu_to_le16(AR9170_TX_MAC_RATE_PROBE);
 		/*
 		 * WARNING:
 		 * Putting the QoS queue bits into an unexplored territory is
@@ -1430,12 +1418,17 @@ static int ar9170_tx_prepare(struct ar9170 *ar, struct sk_buff *skb)
 
 		txc->phy_control |=
 			cpu_to_le32(queue << AR9170_TX_PHY_QOS_SHIFT);
-		arinfo->flags = AR9170_TX_FLAG_WAIT_FOR_ACK;
-	} else {
-		arinfo->flags = AR9170_TX_FLAG_NO_ACK;
+
+		if (info->flags & IEEE80211_TX_CTL_AMPDU) {
+			if (unlikely(!info->control.sta))
+				goto err_out;
+
+			txc->mac_control |= cpu_to_le16(AR9170_TX_MAC_AGGR);
+		} else {
+			txc->mac_control |= cpu_to_le16(AR9170_TX_MAC_RATE_PROBE);
+		}
 	}
 
-out:
 	return 0;
 
 err_out:
@@ -1670,8 +1663,7 @@ static bool ar9170_tx_ampdu(struct ar9170 *ar)
 		 * tell the FW/HW that this is the last frame,
 		 * that way it will wait for the immediate block ack.
 		 */
-		if (likely(skb_peek_tail(&agg)))
-			ar9170_tx_indicate_immba(ar, skb_peek_tail(&agg));
+		ar9170_tx_indicate_immba(ar, skb_peek_tail(&agg));
 
 #ifdef AR9170_TXAGG_DEBUG
 		printk(KERN_DEBUG "%s: generated A-MPDU looks like this:\n",
@@ -1715,6 +1707,21 @@ static void ar9170_tx(struct ar9170 *ar)
 
 	for (i = 0; i < __AR9170_NUM_TXQ; i++) {
 		spin_lock_irqsave(&ar->tx_stats_lock, flags);
+		frames = min(ar->tx_stats[i].limit - ar->tx_stats[i].len,
+			     skb_queue_len(&ar->tx_pending[i]));
+
+		if (remaining_space < frames) {
+#ifdef AR9170_QUEUE_DEBUG
+			printk(KERN_DEBUG "%s: tx quota reached queue:%d, "
+			       "remaining slots:%d, needed:%d\n",
+			       wiphy_name(ar->hw->wiphy), i, remaining_space,
+			       frames);
+#endif /* AR9170_QUEUE_DEBUG */
+			frames = remaining_space;
+		}
+
+		ar->tx_stats[i].len += frames;
+		ar->tx_stats[i].count += frames;
 		if (ar->tx_stats[i].len >= ar->tx_stats[i].limit) {
 #ifdef AR9170_QUEUE_DEBUG
 			printk(KERN_DEBUG "%s: queue %d full\n",
@@ -1732,25 +1739,8 @@ static void ar9170_tx(struct ar9170 *ar)
 			__ar9170_dump_txstats(ar);
 #endif /* AR9170_QUEUE_STOP_DEBUG */
 			ieee80211_stop_queue(ar->hw, i);
-			spin_unlock_irqrestore(&ar->tx_stats_lock, flags);
-			continue;
 		}
 
-		frames = min(ar->tx_stats[i].limit - ar->tx_stats[i].len,
-			     skb_queue_len(&ar->tx_pending[i]));
-
-		if (remaining_space < frames) {
-#ifdef AR9170_QUEUE_DEBUG
-			printk(KERN_DEBUG "%s: tx quota reached queue:%d, "
-			       "remaining slots:%d, needed:%d\n",
-			       wiphy_name(ar->hw->wiphy), i, remaining_space,
-			       frames);
-#endif /* AR9170_QUEUE_DEBUG */
-			frames = remaining_space;
-		}
-
-		ar->tx_stats[i].len += frames;
-		ar->tx_stats[i].count += frames;
 		spin_unlock_irqrestore(&ar->tx_stats_lock, flags);
 
 		if (!frames)
@@ -1772,8 +1762,8 @@ static void ar9170_tx(struct ar9170 *ar)
 			arinfo->timeout = jiffies +
 					  msecs_to_jiffies(AR9170_TX_TIMEOUT);
 
-			if (arinfo->flags == AR9170_TX_FLAG_BLOCK_ACK)
-				ar->tx_ampdu_pending++;
+			if (info->flags & IEEE80211_TX_CTL_AMPDU)
+				atomic_inc(&ar->tx_ampdu_pending);
 
 #ifdef AR9170_QUEUE_DEBUG
 			printk(KERN_DEBUG "%s: send frame q:%d =>\n",
@@ -1783,8 +1773,8 @@ static void ar9170_tx(struct ar9170 *ar)
 
 			err = ar->tx(ar, skb);
 			if (unlikely(err)) {
-				if (arinfo->flags == AR9170_TX_FLAG_BLOCK_ACK)
-					ar->tx_ampdu_pending--;
+				if (info->flags & IEEE80211_TX_CTL_AMPDU)
+					atomic_dec(&ar->tx_ampdu_pending);
 
 				frames_failed++;
 				dev_kfree_skb_any(skb);
@@ -1931,7 +1921,7 @@ int ar9170_op_tx(struct ieee80211_hw *hw, struct sk_buff *skb)
 	if (info->flags & IEEE80211_TX_CTL_AMPDU) {
 		bool run = ar9170_tx_ampdu_queue(ar, skb);
 
-		if (run || !ar->tx_ampdu_pending)
+		if (run || !atomic_read(&ar->tx_ampdu_pending))
 			ar9170_tx_ampdu(ar);
 	} else {
 		unsigned int queue = skb_get_queue_mapping(skb);
@@ -1949,9 +1939,10 @@ err_free:
 }
 
 static int ar9170_op_add_interface(struct ieee80211_hw *hw,
-				   struct ieee80211_if_init_conf *conf)
+				   struct ieee80211_vif *vif)
 {
 	struct ar9170 *ar = hw->priv;
+	struct ath_common *common = &ar->common;
 	int err = 0;
 
 	mutex_lock(&ar->mutex);
@@ -1961,8 +1952,8 @@ static int ar9170_op_add_interface(struct ieee80211_hw *hw,
 		goto unlock;
 	}
 
-	ar->vif = conf->vif;
-	memcpy(ar->mac_addr, conf->mac_addr, ETH_ALEN);
+	ar->vif = vif;
+	memcpy(common->macaddr, vif->addr, ETH_ALEN);
 
 	if (modparam_nohwcrypt || (ar->vif->type != NL80211_IFTYPE_STATION)) {
 		ar->rx_software_decryption = true;
@@ -1982,7 +1973,7 @@ unlock:
 }
 
 static void ar9170_op_remove_interface(struct ieee80211_hw *hw,
-				       struct ieee80211_if_init_conf *conf)
+				       struct ieee80211_vif *vif)
 {
 	struct ar9170 *ar = hw->priv;
 
@@ -2131,12 +2122,13 @@ static void ar9170_op_bss_info_changed(struct ieee80211_hw *hw,
 				       u32 changed)
 {
 	struct ar9170 *ar = hw->priv;
+	struct ath_common *common = &ar->common;
 	int err = 0;
 
 	mutex_lock(&ar->mutex);
 
 	if (changed & BSS_CHANGED_BSSID) {
-		memcpy(ar->bssid, bss_conf->bssid, ETH_ALEN);
+		memcpy(common->curbssid, bss_conf->bssid, ETH_ALEN);
 		err = ar9170_set_operating_mode(ar);
 		if (err)
 			goto out;
@@ -2190,22 +2182,30 @@ static u64 ar9170_op_get_tsf(struct ieee80211_hw *hw)
 {
 	struct ar9170 *ar = hw->priv;
 	int err;
-	u32 tsf_low;
-	u32 tsf_high;
 	u64 tsf;
+#define NR 3
+	static const u32 addr[NR] = { AR9170_MAC_REG_TSF_H,
+				    AR9170_MAC_REG_TSF_L,
+				    AR9170_MAC_REG_TSF_H };
+	u32 val[NR];
+	int loops = 0;
 
 	mutex_lock(&ar->mutex);
-	err = ar9170_read_reg(ar, AR9170_MAC_REG_TSF_L, &tsf_low);
-	if (!err)
-		err = ar9170_read_reg(ar, AR9170_MAC_REG_TSF_H, &tsf_high);
+
+	while (loops++ < 10) {
+		err = ar9170_read_mreg(ar, NR, addr, val);
+		if (err || val[0] == val[2])
+			break;
+	}
+
 	mutex_unlock(&ar->mutex);
 
 	if (WARN_ON(err))
 		return 0;
-
-	tsf = tsf_high;
-	tsf = (tsf << 32) | tsf_low;
+	tsf = val[0];
+	tsf = (tsf << 32) | val[1];
 	return tsf;
+#undef NR
 }
 
 static int ar9170_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
@@ -2329,55 +2329,55 @@ out:
 	return err;
 }
 
-static void ar9170_sta_notify(struct ieee80211_hw *hw,
-			      struct ieee80211_vif *vif,
-			      enum sta_notify_cmd cmd,
-			      struct ieee80211_sta *sta)
+static int ar9170_sta_add(struct ieee80211_hw *hw,
+			  struct ieee80211_vif *vif,
+			  struct ieee80211_sta *sta)
 {
 	struct ar9170 *ar = hw->priv;
 	struct ar9170_sta_info *sta_info = (void *) sta->drv_priv;
 	unsigned int i;
 
-	switch (cmd) {
-	case STA_NOTIFY_ADD:
-		memset(sta_info, 0, sizeof(*sta_info));
+	memset(sta_info, 0, sizeof(*sta_info));
 
-		if (!sta->ht_cap.ht_supported)
-			break;
+	if (!sta->ht_cap.ht_supported)
+		return 0;
 
-		if (sta->ht_cap.ampdu_density > ar->global_ampdu_density)
-			ar->global_ampdu_density = sta->ht_cap.ampdu_density;
+	if (sta->ht_cap.ampdu_density > ar->global_ampdu_density)
+		ar->global_ampdu_density = sta->ht_cap.ampdu_density;
 
-		if (sta->ht_cap.ampdu_factor < ar->global_ampdu_factor)
-			ar->global_ampdu_factor = sta->ht_cap.ampdu_factor;
+	if (sta->ht_cap.ampdu_factor < ar->global_ampdu_factor)
+		ar->global_ampdu_factor = sta->ht_cap.ampdu_factor;
 
-		for (i = 0; i < AR9170_NUM_TID; i++) {
-			sta_info->agg[i].state = AR9170_TID_STATE_SHUTDOWN;
-			sta_info->agg[i].active = false;
-			sta_info->agg[i].ssn = 0;
-			sta_info->agg[i].retry = 0;
-			sta_info->agg[i].tid = i;
-			INIT_LIST_HEAD(&sta_info->agg[i].list);
-			skb_queue_head_init(&sta_info->agg[i].queue);
-		}
-
-		sta_info->ampdu_max_len = 1 << (3 + sta->ht_cap.ampdu_factor);
-		break;
-
-	case STA_NOTIFY_REMOVE:
-		if (!sta->ht_cap.ht_supported)
-			break;
-
-		for (i = 0; i < AR9170_NUM_TID; i++) {
-			sta_info->agg[i].state = AR9170_TID_STATE_INVALID;
-			skb_queue_purge(&sta_info->agg[i].queue);
-		}
-
-		break;
-
-	default:
-		break;
+	for (i = 0; i < AR9170_NUM_TID; i++) {
+		sta_info->agg[i].state = AR9170_TID_STATE_SHUTDOWN;
+		sta_info->agg[i].active = false;
+		sta_info->agg[i].ssn = 0;
+		sta_info->agg[i].tid = i;
+		INIT_LIST_HEAD(&sta_info->agg[i].list);
+		skb_queue_head_init(&sta_info->agg[i].queue);
 	}
+
+	sta_info->ampdu_max_len = 1 << (3 + sta->ht_cap.ampdu_factor);
+
+	return 0;
+}
+
+static int ar9170_sta_remove(struct ieee80211_hw *hw,
+			     struct ieee80211_vif *vif,
+			     struct ieee80211_sta *sta)
+{
+	struct ar9170_sta_info *sta_info = (void *) sta->drv_priv;
+	unsigned int i;
+
+	if (!sta->ht_cap.ht_supported)
+		return 0;
+
+	for (i = 0; i < AR9170_NUM_TID; i++) {
+		sta_info->agg[i].state = AR9170_TID_STATE_INVALID;
+		skb_queue_purge(&sta_info->agg[i].queue);
+	}
+
+	return 0;
 }
 
 static int ar9170_get_stats(struct ieee80211_hw *hw,
@@ -2393,18 +2393,6 @@ static int ar9170_get_stats(struct ieee80211_hw *hw,
 
 	memcpy(stats, &ar->stats, sizeof(*stats));
 	mutex_unlock(&ar->mutex);
-
-	return 0;
-}
-
-static int ar9170_get_tx_stats(struct ieee80211_hw *hw,
-			       struct ieee80211_tx_queue_stats *tx_stats)
-{
-	struct ar9170 *ar = hw->priv;
-
-	spin_lock_bh(&ar->tx_stats_lock);
-	memcpy(tx_stats, ar->tx_stats, sizeof(tx_stats[0]) * hw->queues);
-	spin_unlock_bh(&ar->tx_stats_lock);
 
 	return 0;
 }
@@ -2430,6 +2418,7 @@ static int ar9170_conf_tx(struct ieee80211_hw *hw, u16 queue,
 }
 
 static int ar9170_ampdu_action(struct ieee80211_hw *hw,
+			       struct ieee80211_vif *vif,
 			       enum ieee80211_ampdu_mlme_action action,
 			       struct ieee80211_sta *sta, u16 tid, u16 *ssn)
 {
@@ -2459,7 +2448,7 @@ static int ar9170_ampdu_action(struct ieee80211_hw *hw,
 		tid_info->state = AR9170_TID_STATE_PROGRESS;
 		tid_info->active = false;
 		spin_unlock_irqrestore(&ar->tx_ampdu_list_lock, flags);
-		ieee80211_start_tx_ba_cb_irqsafe(hw, sta->addr, tid);
+		ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
 		break;
 
 	case IEEE80211_AMPDU_TX_STOP:
@@ -2469,7 +2458,7 @@ static int ar9170_ampdu_action(struct ieee80211_hw *hw,
 		tid_info->active = false;
 		skb_queue_purge(&tid_info->queue);
 		spin_unlock_irqrestore(&ar->tx_ampdu_list_lock, flags);
-		ieee80211_stop_tx_ba_cb_irqsafe(hw, sta->addr, tid);
+		ieee80211_stop_tx_ba_cb_irqsafe(vif, sta->addr, tid);
 		break;
 
 	case IEEE80211_AMPDU_TX_OPERATIONAL:
@@ -2507,9 +2496,9 @@ static const struct ieee80211_ops ar9170_ops = {
 	.bss_info_changed	= ar9170_op_bss_info_changed,
 	.get_tsf		= ar9170_op_get_tsf,
 	.set_key		= ar9170_set_key,
-	.sta_notify		= ar9170_sta_notify,
+	.sta_add		= ar9170_sta_add,
+	.sta_remove		= ar9170_sta_remove,
 	.get_stats		= ar9170_get_stats,
-	.get_tx_stats		= ar9170_get_tx_stats,
 	.ampdu_action		= ar9170_ampdu_action,
 };
 
@@ -2523,7 +2512,7 @@ void *ar9170_alloc(size_t priv_size)
 	/*
 	 * this buffer is used for rx stream reconstruction.
 	 * Under heavy load this device (or the transport layer?)
-	 * tends to split the streams into seperate rx descriptors.
+	 * tends to split the streams into separate rx descriptors.
 	 */
 
 	skb = __dev_alloc_skb(AR9170_MAX_RX_BUFFER_SIZE, GFP_KERNEL);
@@ -2712,7 +2701,8 @@ int ar9170_register(struct ar9170 *ar, struct device *pdev)
 	dev_info(pdev, "Atheros AR9170 is registered as '%s'\n",
 		 wiphy_name(ar->hw->wiphy));
 
-	return err;
+	ar->registered = true;
+	return 0;
 
 err_unreg:
 	ieee80211_unregister_hw(ar->hw);
@@ -2723,11 +2713,14 @@ err_out:
 
 void ar9170_unregister(struct ar9170 *ar)
 {
+	if (ar->registered) {
 #ifdef CONFIG_AR9170_LEDS
-	ar9170_unregister_leds(ar);
+		ar9170_unregister_leds(ar);
 #endif /* CONFIG_AR9170_LEDS */
 
-	kfree_skb(ar->rx_failover);
 	ieee80211_unregister_hw(ar->hw);
+	}
+
+	kfree_skb(ar->rx_failover);
 	mutex_destroy(&ar->mutex);
 }

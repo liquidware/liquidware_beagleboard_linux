@@ -64,11 +64,9 @@
 #include "ioctl.h"
 #include "iwctl.h"
 #include "dpc.h"
-#include "iocmd.h"
 #include "datarate.h"
 #include "rf.h"
 #include "firmware.h"
-#include "mac.h"
 #include "rndis.h"
 #include "control.h"
 #include "channel.h"
@@ -809,12 +807,6 @@ vntwusb_found1(struct usb_interface *intf, const struct usb_device_id *id)
         kfree(pDevice);
         return -ENODEV;
     }
-	//2008-0623-02<Remark>by MikeLiu
-        //2007-0821-01<Add>by MikeLiu
-       //#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
-  	//usb_set_intfdata(intf, pDevice);
-	//SET_NETDEV_DEV(netdev, &intf->dev);
-       //#endif
 
 //2008-07-21-01<Add>by MikeLiu
 //register wpadev
@@ -1545,7 +1537,7 @@ if(result!=0) {
   return buffer;
 }
 
-//return --->-1:fail;  >=0:sucessful
+//return --->-1:fail;  >=0:successful
 static int Read_config_file(PSDevice pDevice) {
   int result=0;
   UCHAR      tmpbuffer[100];
@@ -1604,7 +1596,7 @@ static void device_set_multi(struct net_device *dev) {
     PSMgmtObject     pMgmt = &(pDevice->sMgmtObj);
     u32              mc_filter[2];
     int              ii;
-    struct dev_mc_list  *mclist;
+    struct dev_mc_list *mclist;
     BYTE             pbyData[8] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
     BYTE             byTmpMode = 0;
     int              rc;
@@ -1627,7 +1619,8 @@ static void device_set_multi(struct net_device *dev) {
         // Unconditionally log net taps.
         pDevice->byRxMode |= (RCR_MULTICAST|RCR_BROADCAST|RCR_UNICAST);
     }
-    else if ((dev->mc_count > pDevice->multicast_limit) || (dev->flags & IFF_ALLMULTI)) {
+    else if ((netdev_mc_count(dev) > pDevice->multicast_limit) ||
+	     (dev->flags & IFF_ALLMULTI)) {
         CONTROLnsRequestOut(pDevice,
                             MESSAGE_TYPE_WRITE,
                             MAC_REG_MAR0,
@@ -1639,8 +1632,7 @@ static void device_set_multi(struct net_device *dev) {
     }
     else {
         memset(mc_filter, 0, sizeof(mc_filter));
-        for (ii = 0, mclist = dev->mc_list; mclist && ii < dev->mc_count;
-             ii++, mclist = mclist->next) {
+	netdev_for_each_mc_addr(mclist, dev) {
             int bit_nr = ether_crc(ETH_ALEN, mclist->dmi_addr) >> 26;
             mc_filter[bit_nr >> 5] |= cpu_to_le32(1 << (bit_nr & 31));
         }

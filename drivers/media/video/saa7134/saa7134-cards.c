@@ -4160,7 +4160,7 @@ struct saa7134_board saa7134_boards[] = {
 			.amux = LINE2,
 		},
 	},
-	[SAA7134_BOARD_BEHOLD_505RDS] = {
+	[SAA7134_BOARD_BEHOLD_505RDS_MK5] = {
 		/*       Beholder Intl. Ltd. 2008      */
 		/*Dmitry Belimov <d.belimov@gmail.com> */
 		.name           = "Beholder BeholdTV 505 RDS",
@@ -5239,6 +5239,7 @@ struct saa7134_board saa7134_boards[] = {
 		.radio_type     = UNSET,
 		.tuner_addr     = ADDR_UNSET,
 		.radio_addr     = ADDR_UNSET,
+		.mpeg           = SAA7134_MPEG_DVB,
 		.inputs         = { {
 			.name = name_tv,
 			.vmux = 2,
@@ -5277,6 +5278,81 @@ struct saa7134_board saa7134_boards[] = {
 		.radio = {	/* untested */
 			.name = name_radio,
 			.amux = TV,
+		},
+	},
+	[SAA7134_BOARD_ASUS_EUROPA_HYBRID] = {
+		.name           = "Asus Europa Hybrid OEM",
+		.audio_clock    = 0x00187de7,
+		.tuner_type     = TUNER_PHILIPS_TD1316,
+		.radio_type     = UNSET,
+		.tuner_addr	= 0x61,
+		.radio_addr	= ADDR_UNSET,
+		.tda9887_conf   = TDA9887_PRESENT | TDA9887_PORT1_ACTIVE,
+		.mpeg           = SAA7134_MPEG_DVB,
+		.inputs = { {
+			.name   = name_tv,
+			.vmux   = 3,
+			.amux   = TV,
+			.tv     = 1,
+		}, {
+			.name   = name_comp1,
+			.vmux   = 4,
+			.amux   = LINE2,
+		}, {
+			.name   = name_svideo,
+			.vmux   = 8,
+			.amux   = LINE2,
+		} },
+	},
+	[SAA7134_BOARD_LEADTEK_WINFAST_DTV1000S] = {
+		.name           = "Leadtek Winfast DTV1000S",
+		.audio_clock    = 0x00187de7,
+		.tuner_type     = TUNER_PHILIPS_TDA8290,
+		.radio_type     = UNSET,
+		.tuner_addr     = ADDR_UNSET,
+		.radio_addr     = ADDR_UNSET,
+		.mpeg           = SAA7134_MPEG_DVB,
+		.inputs         = { {
+			.name = name_comp1,
+			.vmux = 3,
+		}, {
+			.name = name_svideo,
+			.vmux = 8,
+		} },
+	},
+	[SAA7134_BOARD_BEHOLD_505RDS_MK3] = {
+		/*       Beholder Intl. Ltd. 2008      */
+		/*Dmitry Belimov <d.belimov@gmail.com> */
+		.name           = "Beholder BeholdTV 505 RDS",
+		.audio_clock    = 0x00200000,
+		.tuner_type     = TUNER_PHILIPS_FM1216ME_MK3,
+		.radio_type     = UNSET,
+		.tuner_addr     = ADDR_UNSET,
+		.radio_addr     = ADDR_UNSET,
+		.rds_addr 	= 0x10,
+		.tda9887_conf   = TDA9887_PRESENT,
+		.gpiomask       = 0x00008000,
+		.inputs         = {{
+			.name = name_tv,
+			.vmux = 3,
+			.amux = LINE2,
+			.tv   = 1,
+		}, {
+			.name = name_comp1,
+			.vmux = 1,
+			.amux = LINE1,
+		}, {
+			.name = name_svideo,
+			.vmux = 8,
+			.amux = LINE1,
+		} },
+		.mute = {
+			.name = name_mute,
+			.amux = LINE1,
+		},
+		.radio = {
+			.name = name_radio,
+			.amux = LINE2,
 		},
 	},
 
@@ -6194,7 +6270,13 @@ struct pci_device_id saa7134_pci_tbl[] = {
 		.device       = PCI_DEVICE_ID_PHILIPS_SAA7130,
 		.subvendor    = 0x0000,
 		.subdevice    = 0x505B,
-		.driver_data  = SAA7134_BOARD_BEHOLD_505RDS,
+		.driver_data  = SAA7134_BOARD_BEHOLD_505RDS_MK5,
+	}, {
+		.vendor       = PCI_VENDOR_ID_PHILIPS,
+		.device       = PCI_DEVICE_ID_PHILIPS_SAA7130,
+		.subvendor    = 0x0000,
+		.subdevice    = 0x5051,
+		.driver_data  = SAA7134_BOARD_BEHOLD_505RDS_MK3,
 	},{
 		.vendor       = PCI_VENDOR_ID_PHILIPS,
 		.device       = PCI_DEVICE_ID_PHILIPS_SAA7130,
@@ -6417,6 +6499,18 @@ struct pci_device_id saa7134_pci_tbl[] = {
 		.subvendor    = PCI_VENDOR_ID_PHILIPS,
 		.subdevice    = 0x2004,
 		.driver_data  = SAA7134_BOARD_ZOLID_HYBRID_PCI,
+	}, {
+		.vendor       = PCI_VENDOR_ID_PHILIPS,
+		.device       = PCI_DEVICE_ID_PHILIPS_SAA7134,
+		.subvendor    = 0x1043,
+		.subdevice    = 0x4847,
+		.driver_data  = SAA7134_BOARD_ASUS_EUROPA_HYBRID,
+	}, {
+		.vendor       = PCI_VENDOR_ID_PHILIPS,
+		.device       = PCI_DEVICE_ID_PHILIPS_SAA7130,
+		.subvendor    = 0x107d,
+		.subdevice    = 0x6655,
+		.driver_data  = SAA7134_BOARD_LEADTEK_WINFAST_DTV1000S,
 	}, {
 		/* --- boards without eeprom + subsystem ID --- */
 		.vendor       = PCI_VENDOR_ID_PHILIPS,
@@ -6739,7 +6833,8 @@ int saa7134_board_init1(struct saa7134_dev *dev)
 	case SAA7134_BOARD_BEHOLD_407FM:
 	case SAA7134_BOARD_BEHOLD_409:
 	case SAA7134_BOARD_BEHOLD_505FM:
-	case SAA7134_BOARD_BEHOLD_505RDS:
+	case SAA7134_BOARD_BEHOLD_505RDS_MK5:
+	case SAA7134_BOARD_BEHOLD_505RDS_MK3:
 	case SAA7134_BOARD_BEHOLD_507_9FM:
 	case SAA7134_BOARD_BEHOLD_507RDS_MK3:
 	case SAA7134_BOARD_BEHOLD_507RDS_MK5:
@@ -6748,6 +6843,7 @@ int saa7134_board_init1(struct saa7134_dev *dev)
 	case SAA7134_BOARD_KWORLD_PLUS_TV_ANALOG:
 	case SAA7134_BOARD_AVERMEDIA_GO_007_FM_PLUS:
 	case SAA7134_BOARD_ROVERMEDIA_LINK_PRO_FM:
+	case SAA7134_BOARD_LEADTEK_WINFAST_DTV1000S:
 		dev->has_remote = SAA7134_REMOTE_GPIO;
 		break;
 	case SAA7134_BOARD_FLYDVBS_LR300:
@@ -6899,8 +6995,8 @@ int saa7134_board_init1(struct saa7134_dev *dev)
 		break;
 	case SAA7134_BOARD_VIDEOMATE_S350:
 		dev->has_remote = SAA7134_REMOTE_GPIO;
-		saa_andorl(SAA7134_GPIO_GPMODE0 >> 2,   0x00008000, 0x00008000);
-		saa_andorl(SAA7134_GPIO_GPSTATUS0 >> 2, 0x00008000, 0x00008000);
+		saa_andorl(SAA7134_GPIO_GPMODE0 >> 2,   0x0000C000, 0x0000C000);
+		saa_andorl(SAA7134_GPIO_GPSTATUS0 >> 2, 0x0000C000, 0x0000C000);
 		break;
 	}
 	return 0;
@@ -7079,6 +7175,7 @@ int saa7134_board_init2(struct saa7134_dev *dev)
 		/* break intentionally omitted */
 	case SAA7134_BOARD_VIDEOMATE_DVBT_300:
 	case SAA7134_BOARD_ASUS_EUROPA2_HYBRID:
+	case SAA7134_BOARD_ASUS_EUROPA_HYBRID:
 	{
 
 		/* The Philips EUROPA based hybrid boards have the tuner
@@ -7156,9 +7253,31 @@ int saa7134_board_init2(struct saa7134_dev *dev)
 	}
 	case SAA7134_BOARD_FLYDVB_TRIO:
 	{
+		u8 temp = 0;
+		int rc;
 		u8 data[] = { 0x3c, 0x33, 0x62};
 		struct i2c_msg msg = {.addr=0x09, .flags=0, .buf=data, .len = sizeof(data)};
 		i2c_transfer(&dev->i2c_adap, &msg, 1);
+
+		/*
+		 * send weak up message to pic16C505 chip
+		 * @ LifeView FlyDVB Trio
+		 */
+		msg.buf = &temp;
+		msg.addr = 0x0b;
+		msg.len = 1;
+		if (1 != i2c_transfer(&dev->i2c_adap, &msg, 1)) {
+			printk(KERN_WARNING "%s: send wake up byte to pic16C505"
+					"(IR chip) failed\n", dev->name);
+		} else {
+			msg.flags = I2C_M_RD;
+			rc = i2c_transfer(&dev->i2c_adap, &msg, 1);
+			printk(KERN_INFO "%s: probe IR chip @ i2c 0x%02x: %s\n",
+				   dev->name, msg.addr,
+				   (1 == rc) ? "yes" : "no");
+			if (rc == 1)
+				dev->has_remote = SAA7134_REMOTE_I2C;
+		}
 		break;
 	}
 	case SAA7134_BOARD_ADS_DUO_CARDBUS_PTV331:

@@ -8,7 +8,6 @@
  * is licensed "as is" without any warranty of any kind, whether express
  * or implied.
  */
-#include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/clk.h>
 #include <linux/serial_8250.h>
@@ -18,7 +17,6 @@
 #include <asm/mach/map.h>
 
 #include <mach/dm646x.h>
-#include <mach/clock.h>
 #include <mach/cputype.h>
 #include <mach/edma.h>
 #include <mach/irqs.h>
@@ -44,7 +42,6 @@
 /*
  * Device specific clocks
  */
-#define DM646X_REF_FREQ		27000000
 #define DM646X_AUX_FREQ		24000000
 
 static struct pll_data pll1_data = {
@@ -59,7 +56,6 @@ static struct pll_data pll2_data = {
 
 static struct clk ref_clk = {
 	.name = "ref_clk",
-	.rate = DM646X_REF_FREQ,
 };
 
 static struct clk aux_clkin = {
@@ -315,7 +311,7 @@ static struct clk vpif1_clk = {
 	.flags = ALWAYS_ENABLED,
 };
 
-struct davinci_clk dm646x_clks[] = {
+struct clk_lookup dm646x_clks[] = {
 	CLK(NULL, "ref", &ref_clk),
 	CLK(NULL, "aux", &aux_clkin),
 	CLK(NULL, "pll1", &pll1_clk),
@@ -515,14 +511,6 @@ static u8 dm646x_default_priorities[DAVINCI_N_AINTC_IRQ] = {
 
 /*----------------------------------------------------------------------*/
 
-static const s8 dma_chan_dm646x_no_event[] = {
-	 0,  1,  2,  3, 13,
-	14, 15, 24, 25, 26,
-	27, 30, 31, 54, 55,
-	56,
-	-1
-};
-
 /* Four Transfer Controllers on DM646x */
 static const s8
 dm646x_queue_tc_mapping[][2] = {
@@ -551,7 +539,6 @@ static struct edma_soc_info dm646x_edma_info[] = {
 		.n_slot			= 512,
 		.n_tc			= 4,
 		.n_cc			= 1,
-		.noevent		= dma_chan_dm646x_no_event,
 		.queue_tc_mapping	= dm646x_queue_tc_mapping,
 		.queue_priority_mapping	= dm646x_queue_priority_mapping,
 	},
@@ -789,7 +776,14 @@ static struct davinci_id dm646x_ids[] = {
 		.part_no	= 0xb770,
 		.manufacturer	= 0x017,
 		.cpu_id		= DAVINCI_CPU_ID_DM6467,
-		.name		= "dm6467",
+		.name		= "dm6467_rev1.x",
+	},
+	{
+		.variant	= 0x1,
+		.part_no	= 0xb770,
+		.manufacturer	= 0x017,
+		.cpu_id		= DAVINCI_CPU_ID_DM6467,
+		.name		= "dm6467_rev3.x",
 	},
 };
 
@@ -920,6 +914,7 @@ void dm646x_setup_vpif(struct vpif_display_config *display_config,
 
 void __init dm646x_init(void)
 {
+	dm646x_board_setup_refclk(&ref_clk);
 	davinci_common_init(&davinci_soc_info_dm646x);
 }
 

@@ -50,7 +50,8 @@ radeon_add_legacy_connector(struct drm_device *dev,
 			    uint32_t supported_device,
 			    int connector_type,
 			    struct radeon_i2c_bus_rec *i2c_bus,
-			    uint16_t connector_object_id);
+			    uint16_t connector_object_id,
+			    struct radeon_hpd *hpd);
 
 /* from radeon_legacy_encoder.c */
 extern void
@@ -148,6 +149,9 @@ static uint16_t combios_get_table_offset(struct drm_device *dev,
 	struct radeon_device *rdev = dev->dev_private;
 	int rev;
 	uint16_t offset = 0, check_offset;
+
+	if (!rdev->bios)
+		return 0;
 
 	switch (table) {
 		/* absolute offset tables */
@@ -442,38 +446,164 @@ static uint16_t combios_get_table_offset(struct drm_device *dev,
 
 }
 
-struct radeon_i2c_bus_rec combios_setup_i2c_bus(int ddc_line)
+bool radeon_combios_check_hardcoded_edid(struct radeon_device *rdev)
+{
+	int edid_info;
+	struct edid *edid;
+	edid_info = combios_get_table_offset(rdev->ddev, COMBIOS_HARDCODED_EDID_TABLE);
+	if (!edid_info)
+		return false;
+
+	edid = kmalloc(EDID_LENGTH * (DRM_MAX_EDID_EXT_NUM + 1),
+		       GFP_KERNEL);
+	if (edid == NULL)
+		return false;
+
+	memcpy((unsigned char *)edid,
+	       (unsigned char *)(rdev->bios + edid_info), EDID_LENGTH);
+
+	if (!drm_edid_is_valid(edid)) {
+		kfree(edid);
+		return false;
+	}
+
+	rdev->mode_info.bios_hardcoded_edid = edid;
+	return true;
+}
+
+struct edid *
+radeon_combios_get_hardcoded_edid(struct radeon_device *rdev)
+{
+	if (rdev->mode_info.bios_hardcoded_edid)
+		return rdev->mode_info.bios_hardcoded_edid;
+	return NULL;
+}
+
+static struct radeon_i2c_bus_rec combios_setup_i2c_bus(struct radeon_device *rdev,
+						       int ddc_line)
 {
 	struct radeon_i2c_bus_rec i2c;
 
-	i2c.mask_clk_mask = RADEON_GPIO_EN_1;
-	i2c.mask_data_mask = RADEON_GPIO_EN_0;
-	i2c.a_clk_mask = RADEON_GPIO_A_1;
-	i2c.a_data_mask = RADEON_GPIO_A_0;
-	i2c.put_clk_mask = RADEON_GPIO_EN_1;
-	i2c.put_data_mask = RADEON_GPIO_EN_0;
-	i2c.get_clk_mask = RADEON_GPIO_Y_1;
-	i2c.get_data_mask = RADEON_GPIO_Y_0;
-	if ((ddc_line == RADEON_LCD_GPIO_MASK) ||
-	    (ddc_line == RADEON_MDGPIO_EN_REG)) {
-		i2c.mask_clk_reg = ddc_line;
-		i2c.mask_data_reg = ddc_line;
-		i2c.a_clk_reg = ddc_line;
-		i2c.a_data_reg = ddc_line;
-		i2c.put_clk_reg = ddc_line;
-		i2c.put_data_reg = ddc_line;
-		i2c.get_clk_reg = ddc_line + 4;
-		i2c.get_data_reg = ddc_line + 4;
+	if (ddc_line == RADEON_GPIOPAD_MASK) {
+		i2c.mask_clk_reg = RADEON_GPIOPAD_MASK;
+		i2c.mask_data_reg = RADEON_GPIOPAD_MASK;
+		i2c.a_clk_reg = RADEON_GPIOPAD_A;
+		i2c.a_data_reg = RADEON_GPIOPAD_A;
+		i2c.en_clk_reg = RADEON_GPIOPAD_EN;
+		i2c.en_data_reg = RADEON_GPIOPAD_EN;
+		i2c.y_clk_reg = RADEON_GPIOPAD_Y;
+		i2c.y_data_reg = RADEON_GPIOPAD_Y;
+	} else if (ddc_line == RADEON_MDGPIO_MASK) {
+		i2c.mask_clk_reg = RADEON_MDGPIO_MASK;
+		i2c.mask_data_reg = RADEON_MDGPIO_MASK;
+		i2c.a_clk_reg = RADEON_MDGPIO_A;
+		i2c.a_data_reg = RADEON_MDGPIO_A;
+		i2c.en_clk_reg = RADEON_MDGPIO_EN;
+		i2c.en_data_reg = RADEON_MDGPIO_EN;
+		i2c.y_clk_reg = RADEON_MDGPIO_Y;
+		i2c.y_data_reg = RADEON_MDGPIO_Y;
 	} else {
+		i2c.mask_clk_mask = RADEON_GPIO_EN_1;
+		i2c.mask_data_mask = RADEON_GPIO_EN_0;
+		i2c.a_clk_mask = RADEON_GPIO_A_1;
+		i2c.a_data_mask = RADEON_GPIO_A_0;
+		i2c.en_clk_mask = RADEON_GPIO_EN_1;
+		i2c.en_data_mask = RADEON_GPIO_EN_0;
+		i2c.y_clk_mask = RADEON_GPIO_Y_1;
+		i2c.y_data_mask = RADEON_GPIO_Y_0;
+
 		i2c.mask_clk_reg = ddc_line;
 		i2c.mask_data_reg = ddc_line;
 		i2c.a_clk_reg = ddc_line;
 		i2c.a_data_reg = ddc_line;
-		i2c.put_clk_reg = ddc_line;
-		i2c.put_data_reg = ddc_line;
-		i2c.get_clk_reg = ddc_line;
-		i2c.get_data_reg = ddc_line;
+		i2c.en_clk_reg = ddc_line;
+		i2c.en_data_reg = ddc_line;
+		i2c.y_clk_reg = ddc_line;
+		i2c.y_data_reg = ddc_line;
 	}
+
+	switch (rdev->family) {
+	case CHIP_R100:
+	case CHIP_RV100:
+	case CHIP_RS100:
+	case CHIP_RV200:
+	case CHIP_RS200:
+	case CHIP_RS300:
+		switch (ddc_line) {
+		case RADEON_GPIO_DVI_DDC:
+			/* in theory this should be hw capable,
+			 * but it doesn't seem to work
+			 */
+			i2c.hw_capable = false;
+			break;
+		default:
+			i2c.hw_capable = false;
+			break;
+		}
+		break;
+	case CHIP_R200:
+		switch (ddc_line) {
+		case RADEON_GPIO_DVI_DDC:
+		case RADEON_GPIO_MONID:
+			i2c.hw_capable = true;
+			break;
+		default:
+			i2c.hw_capable = false;
+			break;
+		}
+		break;
+	case CHIP_RV250:
+	case CHIP_RV280:
+		switch (ddc_line) {
+		case RADEON_GPIO_VGA_DDC:
+		case RADEON_GPIO_DVI_DDC:
+		case RADEON_GPIO_CRT2_DDC:
+			i2c.hw_capable = true;
+			break;
+		default:
+			i2c.hw_capable = false;
+			break;
+		}
+		break;
+	case CHIP_R300:
+	case CHIP_R350:
+		switch (ddc_line) {
+		case RADEON_GPIO_VGA_DDC:
+		case RADEON_GPIO_DVI_DDC:
+			i2c.hw_capable = true;
+			break;
+		default:
+			i2c.hw_capable = false;
+			break;
+		}
+		break;
+	case CHIP_RV350:
+	case CHIP_RV380:
+	case CHIP_RS400:
+	case CHIP_RS480:
+		switch (ddc_line) {
+		case RADEON_GPIO_VGA_DDC:
+		case RADEON_GPIO_DVI_DDC:
+			i2c.hw_capable = true;
+			break;
+		case RADEON_GPIO_MONID:
+			/* hw i2c on RADEON_GPIO_MONID doesn't seem to work
+			 * reliably on some pre-r4xx hardware; not sure why.
+			 */
+			i2c.hw_capable = false;
+			break;
+		default:
+			i2c.hw_capable = false;
+			break;
+		}
+		break;
+	default:
+		i2c.hw_capable = false;
+		break;
+	}
+	i2c.mm_i2c = false;
+	i2c.i2c_id = 0;
+	i2c.hpd_id = 0;
 
 	if (ddc_line)
 		i2c.valid = true;
@@ -493,9 +623,6 @@ bool radeon_combios_get_clock_info(struct drm_device *dev)
 	struct radeon_pll *mpll = &rdev->clock.mpll;
 	int8_t rev;
 	uint16_t sclk, mclk;
-
-	if (rdev->bios == NULL)
-		return NULL;
 
 	pll_info = combios_get_table_offset(dev, COMBIOS_PLL_INFO_TABLE);
 	if (pll_info) {
@@ -562,6 +689,48 @@ bool radeon_combios_get_clock_info(struct drm_device *dev)
 	return false;
 }
 
+bool radeon_combios_sideport_present(struct radeon_device *rdev)
+{
+	struct drm_device *dev = rdev->ddev;
+	u16 igp_info;
+
+	igp_info = combios_get_table_offset(dev, COMBIOS_INTEGRATED_SYSTEM_INFO_TABLE);
+
+	if (igp_info) {
+		if (RBIOS16(igp_info + 0x4))
+			return true;
+	}
+	return false;
+}
+
+static const uint32_t default_primarydac_adj[CHIP_LAST] = {
+	0x00000808,		/* r100  */
+	0x00000808,		/* rv100 */
+	0x00000808,		/* rs100 */
+	0x00000808,		/* rv200 */
+	0x00000808,		/* rs200 */
+	0x00000808,		/* r200  */
+	0x00000808,		/* rv250 */
+	0x00000000,		/* rs300 */
+	0x00000808,		/* rv280 */
+	0x00000808,		/* r300  */
+	0x00000808,		/* r350  */
+	0x00000808,		/* rv350 */
+	0x00000808,		/* rv380 */
+	0x00000808,		/* r420  */
+	0x00000808,		/* r423  */
+	0x00000808,		/* rv410 */
+	0x00000000,		/* rs400 */
+	0x00000000,		/* rs480 */
+};
+
+static void radeon_legacy_get_primary_dac_info_from_table(struct radeon_device *rdev,
+							  struct radeon_encoder_primary_dac *p_dac)
+{
+	p_dac->ps2_pdac_adj = default_primarydac_adj[rdev->family];
+	return;
+}
+
 struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 								       radeon_encoder
 								       *encoder)
@@ -571,20 +740,17 @@ struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 	uint16_t dac_info;
 	uint8_t rev, bg, dac;
 	struct radeon_encoder_primary_dac *p_dac = NULL;
+	int found = 0;
 
-	if (rdev->bios == NULL)
+	p_dac = kzalloc(sizeof(struct radeon_encoder_primary_dac),
+			GFP_KERNEL);
+
+	if (!p_dac)
 		return NULL;
 
 	/* check CRT table */
 	dac_info = combios_get_table_offset(dev, COMBIOS_CRT_INFO_TABLE);
 	if (dac_info) {
-		p_dac =
-		    kzalloc(sizeof(struct radeon_encoder_primary_dac),
-			    GFP_KERNEL);
-
-		if (!p_dac)
-			return NULL;
-
 		rev = RBIOS8(dac_info) & 0x3;
 		if (rev < 2) {
 			bg = RBIOS8(dac_info + 0x2) & 0xf;
@@ -595,17 +761,19 @@ struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 			dac = RBIOS8(dac_info + 0x3) & 0xf;
 			p_dac->ps2_pdac_adj = (bg << 8) | (dac);
 		}
-
+		found = 1;
 	}
+
+	if (!found) /* fallback to defaults */
+		radeon_legacy_get_primary_dac_info_from_table(rdev, p_dac);
 
 	return p_dac;
 }
 
-static enum radeon_tv_std
-radeon_combios_get_tv_info(struct radeon_encoder *encoder)
+enum radeon_tv_std
+radeon_combios_get_tv_info(struct radeon_device *rdev)
 {
-	struct drm_device *dev = encoder->base.dev;
-	struct radeon_device *rdev = dev->dev_private;
+	struct drm_device *dev = rdev->ddev;
 	uint16_t tv_info;
 	enum radeon_tv_std tv_std = TV_STD_NTSC;
 
@@ -712,9 +880,6 @@ struct radeon_encoder_tv_dac *radeon_combios_get_tv_dac_info(struct
 	if (!tv_dac)
 		return NULL;
 
-	if (rdev->bios == NULL)
-		goto out;
-
 	/* first check TV table */
 	dac_info = combios_get_table_offset(dev, COMBIOS_TV_INFO_TABLE);
 	if (dac_info) {
@@ -746,7 +911,7 @@ struct radeon_encoder_tv_dac *radeon_combios_get_tv_dac_info(struct
 			tv_dac->ntsc_tvdac_adj = (bg << 16) | (dac << 20);
 			found = 1;
 		}
-		tv_dac->tv_std = radeon_combios_get_tv_info(encoder);
+		tv_dac->tv_std = radeon_combios_get_tv_info(rdev);
 	}
 	if (!found) {
 		/* then check CRT table */
@@ -776,7 +941,6 @@ struct radeon_encoder_tv_dac *radeon_combios_get_tv_dac_info(struct
 		}
 	}
 
-out:
 	if (!found) /* fallback to defaults */
 		radeon_legacy_get_tv_dac_info_from_table(rdev, tv_dac);
 
@@ -864,11 +1028,6 @@ struct radeon_encoder_lvds *radeon_combios_get_lvds_info(struct radeon_encoder
 	int tmp, i;
 	struct radeon_encoder_lvds *lvds = NULL;
 
-	if (rdev->bios == NULL) {
-		lvds = radeon_legacy_get_lvds_info_from_regs(rdev);
-		goto out;
-	}
-
 	lcd_info = combios_get_table_offset(dev, COMBIOS_LCD_INFO_TABLE);
 
 	if (lcd_info) {
@@ -890,8 +1049,7 @@ struct radeon_encoder_lvds *radeon_combios_get_lvds_info(struct radeon_encoder
 			 lvds->native_mode.vdisplay);
 
 		lvds->panel_vcc_delay = RBIOS16(lcd_info + 0x2c);
-		if (lvds->panel_vcc_delay > 2000 || lvds->panel_vcc_delay < 0)
-			lvds->panel_vcc_delay = 2000;
+		lvds->panel_vcc_delay = min_t(u16, lvds->panel_vcc_delay, 2000);
 
 		lvds->panel_pwr_delay = RBIOS8(lcd_info + 0x24);
 		lvds->panel_digon_delay = RBIOS16(lcd_info + 0x38) & 0xf;
@@ -970,7 +1128,7 @@ struct radeon_encoder_lvds *radeon_combios_get_lvds_info(struct radeon_encoder
 		DRM_INFO("No panel info found in BIOS\n");
 		lvds = radeon_legacy_get_lvds_info_from_regs(rdev);
 	}
-out:
+
 	if (lvds)
 		encoder->native_mode = lvds->native_mode;
 	return lvds;
@@ -993,8 +1151,8 @@ static const struct radeon_tmds_pll default_tmds_pll[CHIP_LAST][4] = {
 	{{0xffffffff, 0xb01cb}, {0, 0}, {0, 0}, {0, 0}},	/* CHIP_R420  */
 	{{0xffffffff, 0xb01cb}, {0, 0}, {0, 0}, {0, 0}},	/* CHIP_R423  */
 	{{0xffffffff, 0xb01cb}, {0, 0}, {0, 0}, {0, 0}},	/* CHIP_RV410 */
-	{{15000, 0xb0155}, {0xffffffff, 0xb01cb}, {0, 0}, {0, 0}},	/* CHIP_RS400 */
-	{{15000, 0xb0155}, {0xffffffff, 0xb01cb}, {0, 0}, {0, 0}},	/* CHIP_RS480 */
+	{ {0, 0}, {0, 0}, {0, 0}, {0, 0} },	/* CHIP_RS400 */
+	{ {0, 0}, {0, 0}, {0, 0}, {0, 0} },	/* CHIP_RS480 */
 };
 
 bool radeon_legacy_get_tmds_info_from_table(struct radeon_encoder *encoder,
@@ -1022,13 +1180,9 @@ bool radeon_legacy_get_tmds_info_from_combios(struct radeon_encoder *encoder,
 	int i, n;
 	uint8_t ver;
 
-	if (rdev->bios == NULL)
-		return false;
-
 	tmds_info = combios_get_table_offset(dev, COMBIOS_DFP_INFO_TABLE);
 
 	if (tmds_info) {
-
 		ver = RBIOS8(tmds_info);
 		DRM_INFO("DFP table revision: %d\n", ver);
 		if (ver == 3) {
@@ -1063,96 +1217,184 @@ bool radeon_legacy_get_tmds_info_from_combios(struct radeon_encoder *encoder,
 					  tmds->tmds_pll[i].value);
 			}
 		}
-	} else
+	} else {
 		DRM_INFO("No TMDS info found in BIOS\n");
+		return false;
+	}
 	return true;
 }
 
-struct radeon_encoder_int_tmds *radeon_combios_get_tmds_info(struct radeon_encoder *encoder)
-{
-	struct radeon_encoder_int_tmds *tmds = NULL;
-	bool ret;
-
-	tmds = kzalloc(sizeof(struct radeon_encoder_int_tmds), GFP_KERNEL);
-
-	if (!tmds)
-		return NULL;
-
-	ret = radeon_legacy_get_tmds_info_from_combios(encoder, tmds);
-	if (ret == false)
-		radeon_legacy_get_tmds_info_from_table(encoder, tmds);
-
-	return tmds;
-}
-
-void radeon_combios_get_ext_tmds_info(struct radeon_encoder *encoder)
+bool radeon_legacy_get_ext_tmds_info_from_table(struct radeon_encoder *encoder,
+						struct radeon_encoder_ext_tmds *tmds)
 {
 	struct drm_device *dev = encoder->base.dev;
 	struct radeon_device *rdev = dev->dev_private;
-	uint16_t ext_tmds_info;
-	uint8_t ver;
+	struct radeon_i2c_bus_rec i2c_bus;
 
-	if (rdev->bios == NULL)
-		return;
+	/* default for macs */
+	i2c_bus = combios_setup_i2c_bus(rdev, RADEON_GPIO_MONID);
+	tmds->i2c_bus = radeon_i2c_create(dev, &i2c_bus, "DVO");
 
-	ext_tmds_info =
-	    combios_get_table_offset(dev, COMBIOS_EXT_TMDS_INFO_TABLE);
-	if (ext_tmds_info) {
-		ver = RBIOS8(ext_tmds_info);
-		DRM_INFO("External TMDS Table revision: %d\n", ver);
-		// TODO
+	/* XXX some macs have duallink chips */
+	switch (rdev->mode_info.connector_table) {
+	case CT_POWERBOOK_EXTERNAL:
+	case CT_MINI_EXTERNAL:
+	default:
+		tmds->dvo_chip = DVO_SIL164;
+		tmds->slave_addr = 0x70 >> 1; /* 7 bit addressing */
+		break;
 	}
+
+	return true;
+}
+
+bool radeon_legacy_get_ext_tmds_info_from_combios(struct radeon_encoder *encoder,
+						  struct radeon_encoder_ext_tmds *tmds)
+{
+	struct drm_device *dev = encoder->base.dev;
+	struct radeon_device *rdev = dev->dev_private;
+	uint16_t offset;
+	uint8_t ver, id, blocks, clk, data;
+	int i;
+	enum radeon_combios_ddc gpio;
+	struct radeon_i2c_bus_rec i2c_bus;
+
+	tmds->i2c_bus = NULL;
+	if (rdev->flags & RADEON_IS_IGP) {
+		offset = combios_get_table_offset(dev, COMBIOS_I2C_INFO_TABLE);
+		if (offset) {
+			ver = RBIOS8(offset);
+			DRM_INFO("GPIO Table revision: %d\n", ver);
+			blocks = RBIOS8(offset + 2);
+			for (i = 0; i < blocks; i++) {
+				id = RBIOS8(offset + 3 + (i * 5) + 0);
+				if (id == 136) {
+					clk = RBIOS8(offset + 3 + (i * 5) + 3);
+					data = RBIOS8(offset + 3 + (i * 5) + 4);
+					i2c_bus.valid = true;
+					i2c_bus.mask_clk_mask = (1 << clk);
+					i2c_bus.mask_data_mask = (1 << data);
+					i2c_bus.a_clk_mask = (1 << clk);
+					i2c_bus.a_data_mask = (1 << data);
+					i2c_bus.en_clk_mask = (1 << clk);
+					i2c_bus.en_data_mask = (1 << data);
+					i2c_bus.y_clk_mask = (1 << clk);
+					i2c_bus.y_data_mask = (1 << data);
+					i2c_bus.mask_clk_reg = RADEON_GPIOPAD_MASK;
+					i2c_bus.mask_data_reg = RADEON_GPIOPAD_MASK;
+					i2c_bus.a_clk_reg = RADEON_GPIOPAD_A;
+					i2c_bus.a_data_reg = RADEON_GPIOPAD_A;
+					i2c_bus.en_clk_reg = RADEON_GPIOPAD_EN;
+					i2c_bus.en_data_reg = RADEON_GPIOPAD_EN;
+					i2c_bus.y_clk_reg = RADEON_GPIOPAD_Y;
+					i2c_bus.y_data_reg = RADEON_GPIOPAD_Y;
+					tmds->i2c_bus = radeon_i2c_create(dev, &i2c_bus, "DVO");
+					tmds->dvo_chip = DVO_SIL164;
+					tmds->slave_addr = 0x70 >> 1; /* 7 bit addressing */
+					break;
+				}
+			}
+		}
+	} else {
+		offset = combios_get_table_offset(dev, COMBIOS_EXT_TMDS_INFO_TABLE);
+		if (offset) {
+			ver = RBIOS8(offset);
+			DRM_INFO("External TMDS Table revision: %d\n", ver);
+			tmds->slave_addr = RBIOS8(offset + 4 + 2);
+			tmds->slave_addr >>= 1; /* 7 bit addressing */
+			gpio = RBIOS8(offset + 4 + 3);
+			switch (gpio) {
+			case DDC_MONID:
+				i2c_bus = combios_setup_i2c_bus(rdev, RADEON_GPIO_MONID);
+				tmds->i2c_bus = radeon_i2c_create(dev, &i2c_bus, "DVO");
+				break;
+			case DDC_DVI:
+				i2c_bus = combios_setup_i2c_bus(rdev, RADEON_GPIO_DVI_DDC);
+				tmds->i2c_bus = radeon_i2c_create(dev, &i2c_bus, "DVO");
+				break;
+			case DDC_VGA:
+				i2c_bus = combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
+				tmds->i2c_bus = radeon_i2c_create(dev, &i2c_bus, "DVO");
+				break;
+			case DDC_CRT2:
+				/* R3xx+ chips don't have GPIO_CRT2_DDC gpio pad */
+				if (rdev->family >= CHIP_R300)
+					i2c_bus = combios_setup_i2c_bus(rdev, RADEON_GPIO_MONID);
+				else
+					i2c_bus = combios_setup_i2c_bus(rdev, RADEON_GPIO_CRT2_DDC);
+				tmds->i2c_bus = radeon_i2c_create(dev, &i2c_bus, "DVO");
+				break;
+			case DDC_LCD: /* MM i2c */
+				i2c_bus.valid = true;
+				i2c_bus.hw_capable = true;
+				i2c_bus.mm_i2c = true;
+				tmds->i2c_bus = radeon_i2c_create(dev, &i2c_bus, "DVO");
+				break;
+			default:
+				DRM_ERROR("Unsupported gpio %d\n", gpio);
+				break;
+			}
+		}
+	}
+
+	if (!tmds->i2c_bus) {
+		DRM_INFO("No valid Ext TMDS info found in BIOS\n");
+		return false;
+	}
+
+	return true;
 }
 
 bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 {
 	struct radeon_device *rdev = dev->dev_private;
 	struct radeon_i2c_bus_rec ddc_i2c;
+	struct radeon_hpd hpd;
 
 	rdev->mode_info.connector_table = radeon_connector_table;
 	if (rdev->mode_info.connector_table == CT_NONE) {
 #ifdef CONFIG_PPC_PMAC
-		if (machine_is_compatible("PowerBook3,3")) {
+		if (of_machine_is_compatible("PowerBook3,3")) {
 			/* powerbook with VGA */
 			rdev->mode_info.connector_table = CT_POWERBOOK_VGA;
-		} else if (machine_is_compatible("PowerBook3,4") ||
-			   machine_is_compatible("PowerBook3,5")) {
+		} else if (of_machine_is_compatible("PowerBook3,4") ||
+			   of_machine_is_compatible("PowerBook3,5")) {
 			/* powerbook with internal tmds */
 			rdev->mode_info.connector_table = CT_POWERBOOK_INTERNAL;
-		} else if (machine_is_compatible("PowerBook5,1") ||
-			   machine_is_compatible("PowerBook5,2") ||
-			   machine_is_compatible("PowerBook5,3") ||
-			   machine_is_compatible("PowerBook5,4") ||
-			   machine_is_compatible("PowerBook5,5")) {
+		} else if (of_machine_is_compatible("PowerBook5,1") ||
+			   of_machine_is_compatible("PowerBook5,2") ||
+			   of_machine_is_compatible("PowerBook5,3") ||
+			   of_machine_is_compatible("PowerBook5,4") ||
+			   of_machine_is_compatible("PowerBook5,5")) {
 			/* powerbook with external single link tmds (sil164) */
 			rdev->mode_info.connector_table = CT_POWERBOOK_EXTERNAL;
-		} else if (machine_is_compatible("PowerBook5,6")) {
+		} else if (of_machine_is_compatible("PowerBook5,6")) {
 			/* powerbook with external dual or single link tmds */
 			rdev->mode_info.connector_table = CT_POWERBOOK_EXTERNAL;
-		} else if (machine_is_compatible("PowerBook5,7") ||
-			   machine_is_compatible("PowerBook5,8") ||
-			   machine_is_compatible("PowerBook5,9")) {
+		} else if (of_machine_is_compatible("PowerBook5,7") ||
+			   of_machine_is_compatible("PowerBook5,8") ||
+			   of_machine_is_compatible("PowerBook5,9")) {
 			/* PowerBook6,2 ? */
 			/* powerbook with external dual link tmds (sil1178?) */
 			rdev->mode_info.connector_table = CT_POWERBOOK_EXTERNAL;
-		} else if (machine_is_compatible("PowerBook4,1") ||
-			   machine_is_compatible("PowerBook4,2") ||
-			   machine_is_compatible("PowerBook4,3") ||
-			   machine_is_compatible("PowerBook6,3") ||
-			   machine_is_compatible("PowerBook6,5") ||
-			   machine_is_compatible("PowerBook6,7")) {
+		} else if (of_machine_is_compatible("PowerBook4,1") ||
+			   of_machine_is_compatible("PowerBook4,2") ||
+			   of_machine_is_compatible("PowerBook4,3") ||
+			   of_machine_is_compatible("PowerBook6,3") ||
+			   of_machine_is_compatible("PowerBook6,5") ||
+			   of_machine_is_compatible("PowerBook6,7")) {
 			/* ibook */
 			rdev->mode_info.connector_table = CT_IBOOK;
-		} else if (machine_is_compatible("PowerMac4,4")) {
+		} else if (of_machine_is_compatible("PowerMac4,4")) {
 			/* emac */
 			rdev->mode_info.connector_table = CT_EMAC;
-		} else if (machine_is_compatible("PowerMac10,1")) {
+		} else if (of_machine_is_compatible("PowerMac10,1")) {
 			/* mini with internal tmds */
 			rdev->mode_info.connector_table = CT_MINI_INTERNAL;
-		} else if (machine_is_compatible("PowerMac10,2")) {
+		} else if (of_machine_is_compatible("PowerMac10,2")) {
 			/* mini with external tmds */
 			rdev->mode_info.connector_table = CT_MINI_EXTERNAL;
-		} else if (machine_is_compatible("PowerMac12,1")) {
+		} else if (of_machine_is_compatible("PowerMac12,1")) {
 			/* PowerMac8,1 ? */
 			/* imac g5 isight */
 			rdev->mode_info.connector_table = CT_IMAC_G5_ISIGHT;
@@ -1168,7 +1410,8 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 		/* these are the most common settings */
 		if (rdev->flags & RADEON_SINGLE_CRTC) {
 			/* VGA - primary dac */
-			ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_VGA_DDC);
+			ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
+			hpd.hpd = RADEON_HPD_NONE;
 			radeon_add_legacy_encoder(dev,
 						  radeon_get_encoder_id(dev,
 									ATOM_DEVICE_CRT1_SUPPORT,
@@ -1178,10 +1421,12 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 						    ATOM_DEVICE_CRT1_SUPPORT,
 						    DRM_MODE_CONNECTOR_VGA,
 						    &ddc_i2c,
-						    CONNECTOR_OBJECT_ID_VGA);
+						    CONNECTOR_OBJECT_ID_VGA,
+						    &hpd);
 		} else if (rdev->flags & RADEON_IS_MOBILITY) {
 			/* LVDS */
-			ddc_i2c = combios_setup_i2c_bus(RADEON_LCD_GPIO_MASK);
+			ddc_i2c = combios_setup_i2c_bus(rdev, 0);
+			hpd.hpd = RADEON_HPD_NONE;
 			radeon_add_legacy_encoder(dev,
 						  radeon_get_encoder_id(dev,
 									ATOM_DEVICE_LCD1_SUPPORT,
@@ -1191,10 +1436,12 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 						    ATOM_DEVICE_LCD1_SUPPORT,
 						    DRM_MODE_CONNECTOR_LVDS,
 						    &ddc_i2c,
-						    CONNECTOR_OBJECT_ID_LVDS);
+						    CONNECTOR_OBJECT_ID_LVDS,
+						    &hpd);
 
 			/* VGA - primary dac */
-			ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_VGA_DDC);
+			ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
+			hpd.hpd = RADEON_HPD_NONE;
 			radeon_add_legacy_encoder(dev,
 						  radeon_get_encoder_id(dev,
 									ATOM_DEVICE_CRT1_SUPPORT,
@@ -1204,10 +1451,12 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 						    ATOM_DEVICE_CRT1_SUPPORT,
 						    DRM_MODE_CONNECTOR_VGA,
 						    &ddc_i2c,
-						    CONNECTOR_OBJECT_ID_VGA);
+						    CONNECTOR_OBJECT_ID_VGA,
+						    &hpd);
 		} else {
 			/* DVI-I - tv dac, int tmds */
-			ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_DVI_DDC);
+			ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_DVI_DDC);
+			hpd.hpd = RADEON_HPD_1;
 			radeon_add_legacy_encoder(dev,
 						  radeon_get_encoder_id(dev,
 									ATOM_DEVICE_DFP1_SUPPORT,
@@ -1223,10 +1472,12 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 						    ATOM_DEVICE_CRT2_SUPPORT,
 						    DRM_MODE_CONNECTOR_DVII,
 						    &ddc_i2c,
-						    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_I);
+						    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_I,
+						    &hpd);
 
 			/* VGA - primary dac */
-			ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_VGA_DDC);
+			ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
+			hpd.hpd = RADEON_HPD_NONE;
 			radeon_add_legacy_encoder(dev,
 						  radeon_get_encoder_id(dev,
 									ATOM_DEVICE_CRT1_SUPPORT,
@@ -1236,11 +1487,14 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 						    ATOM_DEVICE_CRT1_SUPPORT,
 						    DRM_MODE_CONNECTOR_VGA,
 						    &ddc_i2c,
-						    CONNECTOR_OBJECT_ID_VGA);
+						    CONNECTOR_OBJECT_ID_VGA,
+						    &hpd);
 		}
 
 		if (rdev->family != CHIP_R100 && rdev->family != CHIP_R200) {
 			/* TV - tv dac */
+			ddc_i2c.valid = false;
+			hpd.hpd = RADEON_HPD_NONE;
 			radeon_add_legacy_encoder(dev,
 						  radeon_get_encoder_id(dev,
 									ATOM_DEVICE_TV1_SUPPORT,
@@ -1250,14 +1504,16 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 						    ATOM_DEVICE_TV1_SUPPORT,
 						    DRM_MODE_CONNECTOR_SVIDEO,
 						    &ddc_i2c,
-						    CONNECTOR_OBJECT_ID_SVIDEO);
+						    CONNECTOR_OBJECT_ID_SVIDEO,
+						    &hpd);
 		}
 		break;
 	case CT_IBOOK:
 		DRM_INFO("Connector Table: %d (ibook)\n",
 			 rdev->mode_info.connector_table);
 		/* LVDS */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_DVI_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_DVI_DDC);
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_LCD1_SUPPORT,
@@ -1265,9 +1521,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					  ATOM_DEVICE_LCD1_SUPPORT);
 		radeon_add_legacy_connector(dev, 0, ATOM_DEVICE_LCD1_SUPPORT,
 					    DRM_MODE_CONNECTOR_LVDS, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_LVDS);
+					    CONNECTOR_OBJECT_ID_LVDS,
+					    &hpd);
 		/* VGA - TV DAC */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_VGA_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_CRT2_SUPPORT,
@@ -1275,8 +1533,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					  ATOM_DEVICE_CRT2_SUPPORT);
 		radeon_add_legacy_connector(dev, 1, ATOM_DEVICE_CRT2_SUPPORT,
 					    DRM_MODE_CONNECTOR_VGA, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_VGA);
+					    CONNECTOR_OBJECT_ID_VGA,
+					    &hpd);
 		/* TV - TV DAC */
+		ddc_i2c.valid = false;
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_TV1_SUPPORT,
@@ -1285,13 +1546,15 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 		radeon_add_legacy_connector(dev, 2, ATOM_DEVICE_TV1_SUPPORT,
 					    DRM_MODE_CONNECTOR_SVIDEO,
 					    &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SVIDEO);
+					    CONNECTOR_OBJECT_ID_SVIDEO,
+					    &hpd);
 		break;
 	case CT_POWERBOOK_EXTERNAL:
 		DRM_INFO("Connector Table: %d (powerbook external tmds)\n",
 			 rdev->mode_info.connector_table);
 		/* LVDS */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_DVI_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_DVI_DDC);
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_LCD1_SUPPORT,
@@ -1299,9 +1562,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					  ATOM_DEVICE_LCD1_SUPPORT);
 		radeon_add_legacy_connector(dev, 0, ATOM_DEVICE_LCD1_SUPPORT,
 					    DRM_MODE_CONNECTOR_LVDS, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_LVDS);
+					    CONNECTOR_OBJECT_ID_LVDS,
+					    &hpd);
 		/* DVI-I - primary dac, ext tmds */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_VGA_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
+		hpd.hpd = RADEON_HPD_2; /* ??? */
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_DFP2_SUPPORT,
@@ -1317,8 +1582,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					    ATOM_DEVICE_DFP2_SUPPORT |
 					    ATOM_DEVICE_CRT1_SUPPORT,
 					    DRM_MODE_CONNECTOR_DVII, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_DUAL_LINK_DVI_I);
+					    CONNECTOR_OBJECT_ID_DUAL_LINK_DVI_I,
+					    &hpd);
 		/* TV - TV DAC */
+		ddc_i2c.valid = false;
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_TV1_SUPPORT,
@@ -1327,13 +1595,15 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 		radeon_add_legacy_connector(dev, 2, ATOM_DEVICE_TV1_SUPPORT,
 					    DRM_MODE_CONNECTOR_SVIDEO,
 					    &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SVIDEO);
+					    CONNECTOR_OBJECT_ID_SVIDEO,
+					    &hpd);
 		break;
 	case CT_POWERBOOK_INTERNAL:
 		DRM_INFO("Connector Table: %d (powerbook internal tmds)\n",
 			 rdev->mode_info.connector_table);
 		/* LVDS */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_DVI_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_DVI_DDC);
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_LCD1_SUPPORT,
@@ -1341,9 +1611,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					  ATOM_DEVICE_LCD1_SUPPORT);
 		radeon_add_legacy_connector(dev, 0, ATOM_DEVICE_LCD1_SUPPORT,
 					    DRM_MODE_CONNECTOR_LVDS, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_LVDS);
+					    CONNECTOR_OBJECT_ID_LVDS,
+					    &hpd);
 		/* DVI-I - primary dac, int tmds */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_VGA_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
+		hpd.hpd = RADEON_HPD_1; /* ??? */
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_DFP1_SUPPORT,
@@ -1358,8 +1630,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					    ATOM_DEVICE_DFP1_SUPPORT |
 					    ATOM_DEVICE_CRT1_SUPPORT,
 					    DRM_MODE_CONNECTOR_DVII, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_I);
+					    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_I,
+					    &hpd);
 		/* TV - TV DAC */
+		ddc_i2c.valid = false;
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_TV1_SUPPORT,
@@ -1368,13 +1643,15 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 		radeon_add_legacy_connector(dev, 2, ATOM_DEVICE_TV1_SUPPORT,
 					    DRM_MODE_CONNECTOR_SVIDEO,
 					    &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SVIDEO);
+					    CONNECTOR_OBJECT_ID_SVIDEO,
+					    &hpd);
 		break;
 	case CT_POWERBOOK_VGA:
 		DRM_INFO("Connector Table: %d (powerbook vga)\n",
 			 rdev->mode_info.connector_table);
 		/* LVDS */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_DVI_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_DVI_DDC);
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_LCD1_SUPPORT,
@@ -1382,9 +1659,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					  ATOM_DEVICE_LCD1_SUPPORT);
 		radeon_add_legacy_connector(dev, 0, ATOM_DEVICE_LCD1_SUPPORT,
 					    DRM_MODE_CONNECTOR_LVDS, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_LVDS);
+					    CONNECTOR_OBJECT_ID_LVDS,
+					    &hpd);
 		/* VGA - primary dac */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_VGA_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_CRT1_SUPPORT,
@@ -1392,8 +1671,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					  ATOM_DEVICE_CRT1_SUPPORT);
 		radeon_add_legacy_connector(dev, 1, ATOM_DEVICE_CRT1_SUPPORT,
 					    DRM_MODE_CONNECTOR_VGA, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_VGA);
+					    CONNECTOR_OBJECT_ID_VGA,
+					    &hpd);
 		/* TV - TV DAC */
+		ddc_i2c.valid = false;
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_TV1_SUPPORT,
@@ -1402,13 +1684,15 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 		radeon_add_legacy_connector(dev, 2, ATOM_DEVICE_TV1_SUPPORT,
 					    DRM_MODE_CONNECTOR_SVIDEO,
 					    &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SVIDEO);
+					    CONNECTOR_OBJECT_ID_SVIDEO,
+					    &hpd);
 		break;
 	case CT_MINI_EXTERNAL:
 		DRM_INFO("Connector Table: %d (mini external tmds)\n",
 			 rdev->mode_info.connector_table);
 		/* DVI-I - tv dac, ext tmds */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_CRT2_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_CRT2_DDC);
+		hpd.hpd = RADEON_HPD_2; /* ??? */
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_DFP2_SUPPORT,
@@ -1424,8 +1708,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					    ATOM_DEVICE_DFP2_SUPPORT |
 					    ATOM_DEVICE_CRT2_SUPPORT,
 					    DRM_MODE_CONNECTOR_DVII, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_I);
+					    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_I,
+					    &hpd);
 		/* TV - TV DAC */
+		ddc_i2c.valid = false;
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_TV1_SUPPORT,
@@ -1434,13 +1721,15 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 		radeon_add_legacy_connector(dev, 1, ATOM_DEVICE_TV1_SUPPORT,
 					    DRM_MODE_CONNECTOR_SVIDEO,
 					    &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SVIDEO);
+					    CONNECTOR_OBJECT_ID_SVIDEO,
+					    &hpd);
 		break;
 	case CT_MINI_INTERNAL:
 		DRM_INFO("Connector Table: %d (mini internal tmds)\n",
 			 rdev->mode_info.connector_table);
 		/* DVI-I - tv dac, int tmds */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_CRT2_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_CRT2_DDC);
+		hpd.hpd = RADEON_HPD_1; /* ??? */
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_DFP1_SUPPORT,
@@ -1455,8 +1744,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					    ATOM_DEVICE_DFP1_SUPPORT |
 					    ATOM_DEVICE_CRT2_SUPPORT,
 					    DRM_MODE_CONNECTOR_DVII, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_I);
+					    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_I,
+					    &hpd);
 		/* TV - TV DAC */
+		ddc_i2c.valid = false;
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_TV1_SUPPORT,
@@ -1465,13 +1757,15 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 		radeon_add_legacy_connector(dev, 1, ATOM_DEVICE_TV1_SUPPORT,
 					    DRM_MODE_CONNECTOR_SVIDEO,
 					    &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SVIDEO);
+					    CONNECTOR_OBJECT_ID_SVIDEO,
+					    &hpd);
 		break;
 	case CT_IMAC_G5_ISIGHT:
 		DRM_INFO("Connector Table: %d (imac g5 isight)\n",
 			 rdev->mode_info.connector_table);
 		/* DVI-D - int tmds */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_MONID);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_MONID);
+		hpd.hpd = RADEON_HPD_1; /* ??? */
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_DFP1_SUPPORT,
@@ -1479,9 +1773,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					  ATOM_DEVICE_DFP1_SUPPORT);
 		radeon_add_legacy_connector(dev, 0, ATOM_DEVICE_DFP1_SUPPORT,
 					    DRM_MODE_CONNECTOR_DVID, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_D);
+					    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_D,
+					    &hpd);
 		/* VGA - tv dac */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_DVI_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_DVI_DDC);
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_CRT2_SUPPORT,
@@ -1489,8 +1785,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					  ATOM_DEVICE_CRT2_SUPPORT);
 		radeon_add_legacy_connector(dev, 1, ATOM_DEVICE_CRT2_SUPPORT,
 					    DRM_MODE_CONNECTOR_VGA, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_VGA);
+					    CONNECTOR_OBJECT_ID_VGA,
+					    &hpd);
 		/* TV - TV DAC */
+		ddc_i2c.valid = false;
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_TV1_SUPPORT,
@@ -1499,13 +1798,15 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 		radeon_add_legacy_connector(dev, 2, ATOM_DEVICE_TV1_SUPPORT,
 					    DRM_MODE_CONNECTOR_SVIDEO,
 					    &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SVIDEO);
+					    CONNECTOR_OBJECT_ID_SVIDEO,
+					    &hpd);
 		break;
 	case CT_EMAC:
 		DRM_INFO("Connector Table: %d (emac)\n",
 			 rdev->mode_info.connector_table);
 		/* VGA - primary dac */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_VGA_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_CRT1_SUPPORT,
@@ -1513,9 +1814,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					  ATOM_DEVICE_CRT1_SUPPORT);
 		radeon_add_legacy_connector(dev, 0, ATOM_DEVICE_CRT1_SUPPORT,
 					    DRM_MODE_CONNECTOR_VGA, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_VGA);
+					    CONNECTOR_OBJECT_ID_VGA,
+					    &hpd);
 		/* VGA - tv dac */
-		ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_CRT2_DDC);
+		ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_CRT2_DDC);
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_CRT2_SUPPORT,
@@ -1523,8 +1826,11 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 					  ATOM_DEVICE_CRT2_SUPPORT);
 		radeon_add_legacy_connector(dev, 1, ATOM_DEVICE_CRT2_SUPPORT,
 					    DRM_MODE_CONNECTOR_VGA, &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_VGA);
+					    CONNECTOR_OBJECT_ID_VGA,
+					    &hpd);
 		/* TV - TV DAC */
+		ddc_i2c.valid = false;
+		hpd.hpd = RADEON_HPD_NONE;
 		radeon_add_legacy_encoder(dev,
 					  radeon_get_encoder_id(dev,
 								ATOM_DEVICE_TV1_SUPPORT,
@@ -1533,7 +1839,8 @@ bool radeon_get_legacy_connector_info_from_table(struct drm_device *dev)
 		radeon_add_legacy_connector(dev, 2, ATOM_DEVICE_TV1_SUPPORT,
 					    DRM_MODE_CONNECTOR_SVIDEO,
 					    &ddc_i2c,
-					    CONNECTOR_OBJECT_ID_SVIDEO);
+					    CONNECTOR_OBJECT_ID_SVIDEO,
+					    &hpd);
 		break;
 	default:
 		DRM_INFO("Connector table: %d (invalid)\n",
@@ -1550,7 +1857,8 @@ static bool radeon_apply_legacy_quirks(struct drm_device *dev,
 				       int bios_index,
 				       enum radeon_combios_connector
 				       *legacy_connector,
-				       struct radeon_i2c_bus_rec *ddc_i2c)
+				       struct radeon_i2c_bus_rec *ddc_i2c,
+				       struct radeon_hpd *hpd)
 {
 	struct radeon_device *rdev = dev->dev_private;
 
@@ -1558,28 +1866,25 @@ static bool radeon_apply_legacy_quirks(struct drm_device *dev,
 	if ((rdev->family == CHIP_RS400 ||
 	     rdev->family == CHIP_RS480) &&
 	    ddc_i2c->mask_clk_reg == RADEON_GPIO_CRT2_DDC)
-		*ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_MONID);
+		*ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_MONID);
 	else if ((rdev->family == CHIP_RS400 ||
 		  rdev->family == CHIP_RS480) &&
 		 ddc_i2c->mask_clk_reg == RADEON_GPIO_MONID) {
-		ddc_i2c->valid = true;
+		*ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIOPAD_MASK);
 		ddc_i2c->mask_clk_mask = (0x20 << 8);
 		ddc_i2c->mask_data_mask = 0x80;
 		ddc_i2c->a_clk_mask = (0x20 << 8);
 		ddc_i2c->a_data_mask = 0x80;
-		ddc_i2c->put_clk_mask = (0x20 << 8);
-		ddc_i2c->put_data_mask = 0x80;
-		ddc_i2c->get_clk_mask = (0x20 << 8);
-		ddc_i2c->get_data_mask = 0x80;
-		ddc_i2c->mask_clk_reg = RADEON_GPIOPAD_MASK;
-		ddc_i2c->mask_data_reg = RADEON_GPIOPAD_MASK;
-		ddc_i2c->a_clk_reg = RADEON_GPIOPAD_A;
-		ddc_i2c->a_data_reg = RADEON_GPIOPAD_A;
-		ddc_i2c->put_clk_reg = RADEON_GPIOPAD_EN;
-		ddc_i2c->put_data_reg = RADEON_GPIOPAD_EN;
-		ddc_i2c->get_clk_reg = RADEON_LCD_GPIO_Y_REG;
-		ddc_i2c->get_data_reg = RADEON_LCD_GPIO_Y_REG;
+		ddc_i2c->en_clk_mask = (0x20 << 8);
+		ddc_i2c->en_data_mask = 0x80;
+		ddc_i2c->y_clk_mask = (0x20 << 8);
+		ddc_i2c->y_data_mask = 0x80;
 	}
+
+	/* R3xx+ chips don't have GPIO_CRT2_DDC gpio pad */
+	if ((rdev->family >= CHIP_R300) &&
+	    ddc_i2c->mask_clk_reg == RADEON_GPIO_CRT2_DDC)
+		*ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_DVI_DDC);
 
 	/* Certain IBM chipset RN50s have a BIOS reporting two VGAs,
 	   one with VGA DDC and one with CRT2 DDC. - kill the CRT2 DDC one */
@@ -1622,6 +1927,12 @@ static bool radeon_apply_legacy_tv_quirks(struct drm_device *dev)
 	if (dev->pdev->device == 0x5974 &&
 	    dev->pdev->subsystem_vendor == 0x103c &&
 	    dev->pdev->subsystem_device == 0x280a)
+		return false;
+
+	/* MSI S270 has non-existent TV port */
+	if (dev->pdev->device == 0x5955 &&
+	    dev->pdev->subsystem_vendor == 0x1462 &&
+	    dev->pdev->subsystem_device == 0x0131)
 		return false;
 
 	return true;
@@ -1671,9 +1982,7 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 	enum radeon_combios_connector connector;
 	int i = 0;
 	struct radeon_i2c_bus_rec ddc_i2c;
-
-	if (rdev->bios == NULL)
-		return false;
+	struct radeon_hpd hpd;
 
 	conn_info = combios_get_table_offset(dev, COMBIOS_CONNECTOR_INFO_TABLE);
 	if (conn_info) {
@@ -1691,26 +2000,40 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 			switch (ddc_type) {
 			case DDC_MONID:
 				ddc_i2c =
-				    combios_setup_i2c_bus(RADEON_GPIO_MONID);
+					combios_setup_i2c_bus(rdev, RADEON_GPIO_MONID);
 				break;
 			case DDC_DVI:
 				ddc_i2c =
-				    combios_setup_i2c_bus(RADEON_GPIO_DVI_DDC);
+					combios_setup_i2c_bus(rdev, RADEON_GPIO_DVI_DDC);
 				break;
 			case DDC_VGA:
 				ddc_i2c =
-				    combios_setup_i2c_bus(RADEON_GPIO_VGA_DDC);
+					combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
 				break;
 			case DDC_CRT2:
 				ddc_i2c =
-				    combios_setup_i2c_bus(RADEON_GPIO_CRT2_DDC);
+					combios_setup_i2c_bus(rdev, RADEON_GPIO_CRT2_DDC);
 				break;
 			default:
 				break;
 			}
 
+			switch (connector) {
+			case CONNECTOR_PROPRIETARY_LEGACY:
+			case CONNECTOR_DVI_I_LEGACY:
+			case CONNECTOR_DVI_D_LEGACY:
+				if ((tmp >> 4) & 0x1)
+					hpd.hpd = RADEON_HPD_2;
+				else
+					hpd.hpd = RADEON_HPD_1;
+				break;
+			default:
+				hpd.hpd = RADEON_HPD_NONE;
+				break;
+			}
+
 			if (!radeon_apply_legacy_quirks(dev, i, &connector,
-						       &ddc_i2c))
+							&ddc_i2c, &hpd))
 				continue;
 
 			switch (connector) {
@@ -1727,7 +2050,8 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 							    legacy_connector_convert
 							    [connector],
 							    &ddc_i2c,
-							    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_D);
+							    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_D,
+							    &hpd);
 				break;
 			case CONNECTOR_CRT_LEGACY:
 				if (tmp & 0x1) {
@@ -1753,7 +2077,8 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 							    legacy_connector_convert
 							    [connector],
 							    &ddc_i2c,
-							    CONNECTOR_OBJECT_ID_VGA);
+							    CONNECTOR_OBJECT_ID_VGA,
+							    &hpd);
 				break;
 			case CONNECTOR_DVI_I_LEGACY:
 				devices = 0;
@@ -1799,7 +2124,8 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 							    legacy_connector_convert
 							    [connector],
 							    &ddc_i2c,
-							    connector_object_id);
+							    connector_object_id,
+							    &hpd);
 				break;
 			case CONNECTOR_DVI_D_LEGACY:
 				if ((tmp >> 4) & 0x1) {
@@ -1817,7 +2143,8 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 							    legacy_connector_convert
 							    [connector],
 							    &ddc_i2c,
-							    connector_object_id);
+							    connector_object_id,
+							    &hpd);
 				break;
 			case CONNECTOR_CTV_LEGACY:
 			case CONNECTOR_STV_LEGACY:
@@ -1832,7 +2159,8 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 							    legacy_connector_convert
 							    [connector],
 							    &ddc_i2c,
-							    CONNECTOR_OBJECT_ID_SVIDEO);
+							    CONNECTOR_OBJECT_ID_SVIDEO,
+							    &hpd);
 				break;
 			default:
 				DRM_ERROR("Unknown connector type: %d\n",
@@ -1858,14 +2186,16 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 									0),
 						  ATOM_DEVICE_DFP1_SUPPORT);
 
-			ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_DVI_DDC);
+			ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_DVI_DDC);
+			hpd.hpd = RADEON_HPD_NONE;
 			radeon_add_legacy_connector(dev,
 						    0,
 						    ATOM_DEVICE_CRT1_SUPPORT |
 						    ATOM_DEVICE_DFP1_SUPPORT,
 						    DRM_MODE_CONNECTOR_DVII,
 						    &ddc_i2c,
-						    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_I);
+						    CONNECTOR_OBJECT_ID_SINGLE_LINK_DVI_I,
+						    &hpd);
 		} else {
 			uint16_t crt_info =
 				combios_get_table_offset(dev, COMBIOS_CRT_INFO_TABLE);
@@ -1876,13 +2206,15 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 										ATOM_DEVICE_CRT1_SUPPORT,
 										1),
 							  ATOM_DEVICE_CRT1_SUPPORT);
-				ddc_i2c = combios_setup_i2c_bus(RADEON_GPIO_VGA_DDC);
+				ddc_i2c = combios_setup_i2c_bus(rdev, RADEON_GPIO_VGA_DDC);
+				hpd.hpd = RADEON_HPD_NONE;
 				radeon_add_legacy_connector(dev,
 							    0,
 							    ATOM_DEVICE_CRT1_SUPPORT,
 							    DRM_MODE_CONNECTOR_VGA,
 							    &ddc_i2c,
-							    CONNECTOR_OBJECT_ID_VGA);
+							    CONNECTOR_OBJECT_ID_VGA,
+							    &hpd);
 			} else {
 				DRM_DEBUG("No connector info found\n");
 				return false;
@@ -1910,27 +2242,27 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 				case DDC_MONID:
 					ddc_i2c =
 					    combios_setup_i2c_bus
-					    (RADEON_GPIO_MONID);
+						(rdev, RADEON_GPIO_MONID);
 					break;
 				case DDC_DVI:
 					ddc_i2c =
 					    combios_setup_i2c_bus
-					    (RADEON_GPIO_DVI_DDC);
+						(rdev, RADEON_GPIO_DVI_DDC);
 					break;
 				case DDC_VGA:
 					ddc_i2c =
 					    combios_setup_i2c_bus
-					    (RADEON_GPIO_VGA_DDC);
+						(rdev, RADEON_GPIO_VGA_DDC);
 					break;
 				case DDC_CRT2:
 					ddc_i2c =
 					    combios_setup_i2c_bus
-					    (RADEON_GPIO_CRT2_DDC);
+						(rdev, RADEON_GPIO_CRT2_DDC);
 					break;
 				case DDC_LCD:
 					ddc_i2c =
 					    combios_setup_i2c_bus
-					    (RADEON_LCD_GPIO_MASK);
+						(rdev, RADEON_GPIOPAD_MASK);
 					ddc_i2c.mask_clk_mask =
 					    RBIOS32(lcd_ddc_info + 3);
 					ddc_i2c.mask_data_mask =
@@ -1939,19 +2271,19 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 					    RBIOS32(lcd_ddc_info + 3);
 					ddc_i2c.a_data_mask =
 					    RBIOS32(lcd_ddc_info + 7);
-					ddc_i2c.put_clk_mask =
+					ddc_i2c.en_clk_mask =
 					    RBIOS32(lcd_ddc_info + 3);
-					ddc_i2c.put_data_mask =
+					ddc_i2c.en_data_mask =
 					    RBIOS32(lcd_ddc_info + 7);
-					ddc_i2c.get_clk_mask =
+					ddc_i2c.y_clk_mask =
 					    RBIOS32(lcd_ddc_info + 3);
-					ddc_i2c.get_data_mask =
+					ddc_i2c.y_data_mask =
 					    RBIOS32(lcd_ddc_info + 7);
 					break;
 				case DDC_GPIO:
 					ddc_i2c =
 					    combios_setup_i2c_bus
-					    (RADEON_MDGPIO_EN_REG);
+						(rdev, RADEON_MDGPIO_MASK);
 					ddc_i2c.mask_clk_mask =
 					    RBIOS32(lcd_ddc_info + 3);
 					ddc_i2c.mask_data_mask =
@@ -1960,13 +2292,13 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 					    RBIOS32(lcd_ddc_info + 3);
 					ddc_i2c.a_data_mask =
 					    RBIOS32(lcd_ddc_info + 7);
-					ddc_i2c.put_clk_mask =
+					ddc_i2c.en_clk_mask =
 					    RBIOS32(lcd_ddc_info + 3);
-					ddc_i2c.put_data_mask =
+					ddc_i2c.en_data_mask =
 					    RBIOS32(lcd_ddc_info + 7);
-					ddc_i2c.get_clk_mask =
+					ddc_i2c.y_clk_mask =
 					    RBIOS32(lcd_ddc_info + 3);
-					ddc_i2c.get_data_mask =
+					ddc_i2c.y_data_mask =
 					    RBIOS32(lcd_ddc_info + 7);
 					break;
 				default:
@@ -1977,12 +2309,14 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 			} else
 				ddc_i2c.valid = false;
 
+			hpd.hpd = RADEON_HPD_NONE;
 			radeon_add_legacy_connector(dev,
 						    5,
 						    ATOM_DEVICE_LCD1_SUPPORT,
 						    DRM_MODE_CONNECTOR_LVDS,
 						    &ddc_i2c,
-						    CONNECTOR_OBJECT_ID_LVDS);
+						    CONNECTOR_OBJECT_ID_LVDS,
+						    &hpd);
 		}
 	}
 
@@ -1993,6 +2327,7 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 		if (tv_info) {
 			if (RBIOS8(tv_info + 6) == 'T') {
 				if (radeon_apply_legacy_tv_quirks(dev)) {
+					hpd.hpd = RADEON_HPD_NONE;
 					radeon_add_legacy_encoder(dev,
 								  radeon_get_encoder_id
 								  (dev,
@@ -2003,7 +2338,8 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 								    ATOM_DEVICE_TV1_SUPPORT,
 								    DRM_MODE_CONNECTOR_SVIDEO,
 								    &ddc_i2c,
-								    CONNECTOR_OBJECT_ID_SVIDEO);
+								    CONNECTOR_OBJECT_ID_SVIDEO,
+								    &hpd);
 				}
 			}
 		}
@@ -2012,6 +2348,293 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 	radeon_link_encoder_connector(dev);
 
 	return true;
+}
+
+void radeon_combios_get_power_modes(struct radeon_device *rdev)
+{
+	struct drm_device *dev = rdev->ddev;
+	u16 offset, misc, misc2 = 0;
+	u8 rev, blocks, tmp;
+	int state_index = 0;
+
+	rdev->pm.default_power_state = NULL;
+
+	if (rdev->flags & RADEON_IS_MOBILITY) {
+		offset = combios_get_table_offset(dev, COMBIOS_POWERPLAY_INFO_TABLE);
+		if (offset) {
+			rev = RBIOS8(offset);
+			blocks = RBIOS8(offset + 0x2);
+			/* power mode 0 tends to be the only valid one */
+			rdev->pm.power_state[state_index].num_clock_modes = 1;
+			rdev->pm.power_state[state_index].clock_info[0].mclk = RBIOS32(offset + 0x5 + 0x2);
+			rdev->pm.power_state[state_index].clock_info[0].sclk = RBIOS32(offset + 0x5 + 0x6);
+			if ((rdev->pm.power_state[state_index].clock_info[0].mclk == 0) ||
+			    (rdev->pm.power_state[state_index].clock_info[0].sclk == 0))
+				goto default_mode;
+			/* skip overclock modes for now */
+			if ((rdev->pm.power_state[state_index].clock_info[0].mclk >
+			     rdev->clock.default_mclk + RADEON_MODE_OVERCLOCK_MARGIN) ||
+			    (rdev->pm.power_state[state_index].clock_info[0].sclk >
+			     rdev->clock.default_sclk + RADEON_MODE_OVERCLOCK_MARGIN))
+				goto default_mode;
+			rdev->pm.power_state[state_index].type =
+				POWER_STATE_TYPE_BATTERY;
+			misc = RBIOS16(offset + 0x5 + 0x0);
+			if (rev > 4)
+				misc2 = RBIOS16(offset + 0x5 + 0xe);
+			if (misc & 0x4) {
+				rdev->pm.power_state[state_index].clock_info[0].voltage.type = VOLTAGE_GPIO;
+				if (misc & 0x8)
+					rdev->pm.power_state[state_index].clock_info[0].voltage.active_high =
+						true;
+				else
+					rdev->pm.power_state[state_index].clock_info[0].voltage.active_high =
+						false;
+				rdev->pm.power_state[state_index].clock_info[0].voltage.gpio.valid = true;
+				if (rev < 6) {
+					rdev->pm.power_state[state_index].clock_info[0].voltage.gpio.reg =
+						RBIOS16(offset + 0x5 + 0xb) * 4;
+					tmp = RBIOS8(offset + 0x5 + 0xd);
+					rdev->pm.power_state[state_index].clock_info[0].voltage.gpio.mask = (1 << tmp);
+				} else {
+					u8 entries = RBIOS8(offset + 0x5 + 0xb);
+					u16 voltage_table_offset = RBIOS16(offset + 0x5 + 0xc);
+					if (entries && voltage_table_offset) {
+						rdev->pm.power_state[state_index].clock_info[0].voltage.gpio.reg =
+							RBIOS16(voltage_table_offset) * 4;
+						tmp = RBIOS8(voltage_table_offset + 0x2);
+						rdev->pm.power_state[state_index].clock_info[0].voltage.gpio.mask = (1 << tmp);
+					} else
+						rdev->pm.power_state[state_index].clock_info[0].voltage.gpio.valid = false;
+				}
+				switch ((misc2 & 0x700) >> 8) {
+				case 0:
+				default:
+					rdev->pm.power_state[state_index].clock_info[0].voltage.delay = 0;
+					break;
+				case 1:
+					rdev->pm.power_state[state_index].clock_info[0].voltage.delay = 33;
+					break;
+				case 2:
+					rdev->pm.power_state[state_index].clock_info[0].voltage.delay = 66;
+					break;
+				case 3:
+					rdev->pm.power_state[state_index].clock_info[0].voltage.delay = 99;
+					break;
+				case 4:
+					rdev->pm.power_state[state_index].clock_info[0].voltage.delay = 132;
+					break;
+				}
+			} else
+				rdev->pm.power_state[state_index].clock_info[0].voltage.type = VOLTAGE_NONE;
+			if (rev > 6)
+				rdev->pm.power_state[state_index].non_clock_info.pcie_lanes =
+					RBIOS8(offset + 0x5 + 0x10);
+			state_index++;
+		} else {
+			/* XXX figure out some good default low power mode for mobility cards w/out power tables */
+		}
+	} else {
+		/* XXX figure out some good default low power mode for desktop cards */
+	}
+
+default_mode:
+	/* add the default mode */
+	rdev->pm.power_state[state_index].type =
+		POWER_STATE_TYPE_DEFAULT;
+	rdev->pm.power_state[state_index].num_clock_modes = 1;
+	rdev->pm.power_state[state_index].clock_info[0].mclk = rdev->clock.default_mclk;
+	rdev->pm.power_state[state_index].clock_info[0].sclk = rdev->clock.default_sclk;
+	rdev->pm.power_state[state_index].default_clock_mode = &rdev->pm.power_state[state_index].clock_info[0];
+	rdev->pm.power_state[state_index].clock_info[0].voltage.type = VOLTAGE_NONE;
+	if (rdev->asic->get_pcie_lanes)
+		rdev->pm.power_state[state_index].non_clock_info.pcie_lanes = radeon_get_pcie_lanes(rdev);
+	else
+		rdev->pm.power_state[state_index].non_clock_info.pcie_lanes = 16;
+	rdev->pm.default_power_state = &rdev->pm.power_state[state_index];
+	rdev->pm.num_power_states = state_index + 1;
+
+	rdev->pm.current_power_state = rdev->pm.default_power_state;
+	rdev->pm.current_clock_mode =
+		rdev->pm.default_power_state->default_clock_mode;
+}
+
+void radeon_external_tmds_setup(struct drm_encoder *encoder)
+{
+	struct radeon_encoder *radeon_encoder = to_radeon_encoder(encoder);
+	struct radeon_encoder_ext_tmds *tmds = radeon_encoder->enc_priv;
+
+	if (!tmds)
+		return;
+
+	switch (tmds->dvo_chip) {
+	case DVO_SIL164:
+		/* sil 164 */
+		radeon_i2c_put_byte(tmds->i2c_bus,
+				    tmds->slave_addr,
+				    0x08, 0x30);
+		radeon_i2c_put_byte(tmds->i2c_bus,
+				       tmds->slave_addr,
+				       0x09, 0x00);
+		radeon_i2c_put_byte(tmds->i2c_bus,
+				    tmds->slave_addr,
+				    0x0a, 0x90);
+		radeon_i2c_put_byte(tmds->i2c_bus,
+				    tmds->slave_addr,
+				    0x0c, 0x89);
+		radeon_i2c_put_byte(tmds->i2c_bus,
+				       tmds->slave_addr,
+				       0x08, 0x3b);
+		break;
+	case DVO_SIL1178:
+		/* sil 1178 - untested */
+		/*
+		 * 0x0f, 0x44
+		 * 0x0f, 0x4c
+		 * 0x0e, 0x01
+		 * 0x0a, 0x80
+		 * 0x09, 0x30
+		 * 0x0c, 0xc9
+		 * 0x0d, 0x70
+		 * 0x08, 0x32
+		 * 0x08, 0x33
+		 */
+		break;
+	default:
+		break;
+	}
+
+}
+
+bool radeon_combios_external_tmds_setup(struct drm_encoder *encoder)
+{
+	struct drm_device *dev = encoder->dev;
+	struct radeon_device *rdev = dev->dev_private;
+	struct radeon_encoder *radeon_encoder = to_radeon_encoder(encoder);
+	uint16_t offset;
+	uint8_t blocks, slave_addr, rev;
+	uint32_t index, id;
+	uint32_t reg, val, and_mask, or_mask;
+	struct radeon_encoder_ext_tmds *tmds = radeon_encoder->enc_priv;
+
+	if (!tmds)
+		return false;
+
+	if (rdev->flags & RADEON_IS_IGP) {
+		offset = combios_get_table_offset(dev, COMBIOS_TMDS_POWER_ON_TABLE);
+		rev = RBIOS8(offset);
+		if (offset) {
+			rev = RBIOS8(offset);
+			if (rev > 1) {
+				blocks = RBIOS8(offset + 3);
+				index = offset + 4;
+				while (blocks > 0) {
+					id = RBIOS16(index);
+					index += 2;
+					switch (id >> 13) {
+					case 0:
+						reg = (id & 0x1fff) * 4;
+						val = RBIOS32(index);
+						index += 4;
+						WREG32(reg, val);
+						break;
+					case 2:
+						reg = (id & 0x1fff) * 4;
+						and_mask = RBIOS32(index);
+						index += 4;
+						or_mask = RBIOS32(index);
+						index += 4;
+						val = RREG32(reg);
+						val = (val & and_mask) | or_mask;
+						WREG32(reg, val);
+						break;
+					case 3:
+						val = RBIOS16(index);
+						index += 2;
+						udelay(val);
+						break;
+					case 4:
+						val = RBIOS16(index);
+						index += 2;
+						udelay(val * 1000);
+						break;
+					case 6:
+						slave_addr = id & 0xff;
+						slave_addr >>= 1; /* 7 bit addressing */
+						index++;
+						reg = RBIOS8(index);
+						index++;
+						val = RBIOS8(index);
+						index++;
+						radeon_i2c_put_byte(tmds->i2c_bus,
+								    slave_addr,
+								    reg, val);
+						break;
+					default:
+						DRM_ERROR("Unknown id %d\n", id >> 13);
+						break;
+					}
+					blocks--;
+				}
+				return true;
+			}
+		}
+	} else {
+		offset = combios_get_table_offset(dev, COMBIOS_EXT_TMDS_INFO_TABLE);
+		if (offset) {
+			index = offset + 10;
+			id = RBIOS16(index);
+			while (id != 0xffff) {
+				index += 2;
+				switch (id >> 13) {
+				case 0:
+					reg = (id & 0x1fff) * 4;
+					val = RBIOS32(index);
+					WREG32(reg, val);
+					break;
+				case 2:
+					reg = (id & 0x1fff) * 4;
+					and_mask = RBIOS32(index);
+					index += 4;
+					or_mask = RBIOS32(index);
+					index += 4;
+					val = RREG32(reg);
+					val = (val & and_mask) | or_mask;
+					WREG32(reg, val);
+					break;
+				case 4:
+					val = RBIOS16(index);
+					index += 2;
+					udelay(val);
+					break;
+				case 5:
+					reg = id & 0x1fff;
+					and_mask = RBIOS32(index);
+					index += 4;
+					or_mask = RBIOS32(index);
+					index += 4;
+					val = RREG32_PLL(reg);
+					val = (val & and_mask) | or_mask;
+					WREG32_PLL(reg, val);
+					break;
+				case 6:
+					reg = id & 0x1fff;
+					val = RBIOS8(index);
+					index += 1;
+					radeon_i2c_put_byte(tmds->i2c_bus,
+							    tmds->slave_addr,
+							    reg, val);
+					break;
+				default:
+					DRM_ERROR("Unknown id %d\n", id >> 13);
+					break;
+				}
+				id = RBIOS16(index);
+			}
+			return true;
+		}
+	}
+	return false;
 }
 
 static void combios_parse_mmio_table(struct drm_device *dev, uint16_t offset)

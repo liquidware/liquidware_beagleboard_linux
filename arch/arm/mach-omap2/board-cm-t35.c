@@ -29,7 +29,7 @@
 #include <linux/gpio.h>
 
 #include <linux/i2c/at24.h>
-#include <linux/i2c/twl4030.h>
+#include <linux/i2c/twl.h>
 #include <linux/regulator/machine.h>
 
 #include <linux/spi/spi.h>
@@ -41,7 +41,6 @@
 
 #include <plat/board.h>
 #include <plat/common.h>
-#include <plat/mux.h>
 #include <plat/nand.h>
 #include <plat/gpmc.h>
 #include <plat/usb.h>
@@ -49,8 +48,9 @@
 
 #include <mach/hardware.h>
 
+#include "mux.h"
 #include "sdram-micron-mt46h32m32lf-6.h"
-#include "mmc-twl4030.h"
+#include "hsmmc.h"
 
 #define CM_T35_GPIO_PENDOWN	57
 
@@ -436,7 +436,7 @@ static struct spi_board_info cm_t35_lcd_spi_board_info[] __initdata = {
 	},
 };
 
-static void __init cm_t35_display_init(void)
+static void __init cm_t35_init_display(void)
 {
 	int err;
 
@@ -593,7 +593,7 @@ static struct twl4030_keypad_data cm_t35_kp_data = {
 	.rep		= 1,
 };
 
-static struct twl4030_hsmmc_info mmc[] = {
+static struct omap2_hsmmc_info mmc[] = {
 	{
 		.mmc		= 1,
 		.wires		= 4,
@@ -612,7 +612,7 @@ static struct twl4030_hsmmc_info mmc[] = {
 	{}	/* Terminator */
 };
 
-static struct ehci_hcd_omap_platform_data ehci_pdata = {
+static struct ehci_hcd_omap_platform_data ehci_pdata __initdata = {
 	.port_mode[0] = EHCI_HCD_OMAP_MODE_PHY,
 	.port_mode[1] = EHCI_HCD_OMAP_MODE_PHY,
 	.port_mode[2] = EHCI_HCD_OMAP_MODE_UNKNOWN,
@@ -642,7 +642,7 @@ static int cm_t35_twl_gpio_setup(struct device *dev, unsigned gpio,
 
 	/* gpio + 0 is "mmc0_cd" (input/IRQ) */
 	mmc[0].gpio_cd = gpio + 0;
-	twl4030_mmc_init(mmc);
+	omap2_hsmmc_init(mmc);
 
 	/* link regulators to MMC adapters */
 	cm_t35_vmmc1_supply.dev = mmc[0].dev;
@@ -693,99 +693,6 @@ static void __init cm_t35_init_i2c(void)
 			      ARRAY_SIZE(cm_t35_i2c_boardinfo));
 }
 
-static void __init cm_t35_init_mux(void)
-{
-	/* nCS and IRQ mux for CM-T35 ethernet */
-	omap_cfg_reg(G5_34XX_GPMC_NCS5);
-	omap_cfg_reg(A23_34XX_GPIO163_UP);
-
-	/* nCS, IRQ and reset mux for SB-T35 ethernet */
-	omap_cfg_reg(F4_34XX_GPMC_NCS4);
-	omap_cfg_reg(N21_34XX_GPIO127_UP);
-	omap_cfg_reg(B23_34XX_GPIO164_OUT);
-
-	/* PENDOWN GPIO */
-	omap_cfg_reg(F3_34XX_GPIO57_UP);
-
-	/* mUSB */
-	omap_cfg_reg(R21_3430_USB0HS_PHY_CLK);
-	omap_cfg_reg(R23_3430_USB0HS_PHY_STP);
-	omap_cfg_reg(P23_3430_USB0HS_PHY_DIR);
-	omap_cfg_reg(R22_3430_USB0HS_PHY_NXT);
-	omap_cfg_reg(T24_3430_USB0HS_PHY_DATA0);
-	omap_cfg_reg(T23_3430_USB0HS_PHY_DATA1);
-	omap_cfg_reg(U24_3430_USB0HS_PHY_DATA2);
-	omap_cfg_reg(U23_3430_USB0HS_PHY_DATA3);
-	omap_cfg_reg(W24_3430_USB0HS_PHY_DATA4);
-	omap_cfg_reg(V23_3430_USB0HS_PHY_DATA5);
-	omap_cfg_reg(W23_3430_USB0HS_PHY_DATA6);
-	omap_cfg_reg(T22_3430_USB0HS_PHY_DATA7);
-
-	/* MMC 2 */
-	omap_cfg_reg(AB2_3430_MMC2_DIR_DAT0);
-	omap_cfg_reg(AA2_3430_MMC2_DIR_DAT1);
-	omap_cfg_reg(Y2_3430_MMC2_DIR_CMD);
-	omap_cfg_reg(AA1_3420_MMC2_CLKIN);
-
-	/* McSPI 1 */
-	omap_cfg_reg(T5_34XX_MCSPI1_CLK);
-	omap_cfg_reg(R4_34XX_MCSPI1_SIMO);
-	omap_cfg_reg(T4_34XX_MCSPI1_SOMI);
-	omap_cfg_reg(T6_34XX_MCSPI1_CS0);
-
-	/* McBSP 2 */
-	omap_cfg_reg(V20_34XX_MCBSP2_FSX);
-	omap_cfg_reg(T21_34XX_MCBSP2_CLKX);
-	omap_cfg_reg(V19_34XX_MCBSP2_DR);
-	omap_cfg_reg(R20_34XX_MCBSP2_DX);
-
-	omap_cfg_reg(F21_34XX_GPIO109_OUT);
-
-	/* serial ports */
-	omap_cfg_reg(W4_34XX_UART2_TX);
-	omap_cfg_reg(V4_34XX_UART2_RX);
-	omap_cfg_reg(W7_34XX_UART1_TX);
-	omap_cfg_reg(V7_34XX_UART1_RX);
-
-	/* display controls */
-	omap_cfg_reg(U8_34XX_GPIO54_OUT);
-	omap_cfg_reg(G4_34XX_GPIO58_OUT);
-/* 	omap_cfg_reg(??_34XX_GPIO129_OUT); */
-
-	/* DSS */
-	omap_cfg_reg(G22_34XX_DSS_PCLK);
-	omap_cfg_reg(E22_34XX_DSS_HSYNC);
-	omap_cfg_reg(F22_34XX_DSS_VSYNC);
-	omap_cfg_reg(J21_34XX_DSS_ACBIAS);
-	omap_cfg_reg(AC19_34XX_DSS_DATA0);
-	omap_cfg_reg(AB19_34XX_DSS_DATA1);
-	omap_cfg_reg(AD20_34XX_DSS_DATA2);
-	omap_cfg_reg(AC20_34XX_DSS_DATA3);
-	omap_cfg_reg(AD21_34XX_DSS_DATA4);
-	omap_cfg_reg(AC21_34XX_DSS_DATA5);
-	omap_cfg_reg(D24_34XX_DSS_DATA6);
-	omap_cfg_reg(E23_34XX_DSS_DATA7);
-	omap_cfg_reg(E24_34XX_DSS_DATA8);
-	omap_cfg_reg(F23_34XX_DSS_DATA9);
-	omap_cfg_reg(AC22_34XX_DSS_DATA10);
-	omap_cfg_reg(AC23_34XX_DSS_DATA11);
-	omap_cfg_reg(AB22_34XX_DSS_DATA12);
-	omap_cfg_reg(Y22_34XX_DSS_DATA13);
-	omap_cfg_reg(W22_34XX_DSS_DATA14);
-	omap_cfg_reg(V22_34XX_DSS_DATA15);
-	omap_cfg_reg(J22_34XX_DSS_DATA16);
-	omap_cfg_reg(G23_34XX_DSS_DATA17);
-	omap_cfg_reg(G24_34XX_DSS_DATA18);
-	omap_cfg_reg(H23_34XX_DSS_DATA19);
-	omap_cfg_reg(D23_34XX_DSS_DATA20);
-	omap_cfg_reg(K22_34XX_DSS_DATA21);
-	omap_cfg_reg(V21_34XX_DSS_DATA22);
-	omap_cfg_reg(W21_34XX_DSS_DATA23);
-
-	/* TPS IRQ */
-	omap_cfg_reg(AF26_34XX_SYS_NIRQ);
-}
-
 static struct omap_board_config_kernel cm_t35_config[] __initdata = {
 };
 
@@ -803,23 +710,125 @@ static void __init cm_t35_init_irq(void)
 static void __init cm_t35_map_io(void)
 {
 	omap2_set_globals_343x();
-	omap2_map_common_io();
+	omap34xx_map_common_io();
 }
+
+static struct omap_board_mux board_mux[] __initdata = {
+	/* nCS and IRQ for CM-T35 ethernet */
+	OMAP3_MUX(GPMC_NCS5, OMAP_MUX_MODE0),
+	OMAP3_MUX(UART3_CTS_RCTX, OMAP_MUX_MODE4 | OMAP_PIN_INPUT_PULLUP),
+
+	/* nCS and IRQ for SB-T35 ethernet */
+	OMAP3_MUX(GPMC_NCS4, OMAP_MUX_MODE0),
+	OMAP3_MUX(GPMC_WAIT3, OMAP_MUX_MODE4 | OMAP_PIN_INPUT_PULLUP),
+
+	/* PENDOWN GPIO */
+	OMAP3_MUX(GPMC_NCS6, OMAP_MUX_MODE4 | OMAP_PIN_INPUT),
+
+	/* mUSB */
+	OMAP3_MUX(HSUSB0_CLK, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(HSUSB0_STP, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(HSUSB0_DIR, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(HSUSB0_NXT, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(HSUSB0_DATA0, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(HSUSB0_DATA1, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(HSUSB0_DATA2, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(HSUSB0_DATA3, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(HSUSB0_DATA4, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(HSUSB0_DATA5, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(HSUSB0_DATA6, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(HSUSB0_DATA7, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+
+	/* MMC 2 */
+	OMAP3_MUX(SDMMC2_DAT4, OMAP_MUX_MODE1 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(SDMMC2_DAT5, OMAP_MUX_MODE1 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(SDMMC2_DAT6, OMAP_MUX_MODE1 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(SDMMC2_DAT7, OMAP_MUX_MODE1 | OMAP_PIN_INPUT),
+
+	/* McSPI 1 */
+	OMAP3_MUX(MCSPI1_CLK, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(MCSPI1_SIMO, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(MCSPI1_SOMI, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(MCSPI1_CS0, OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLDOWN),
+
+	/* McSPI 4 */
+	OMAP3_MUX(MCBSP1_CLKR, OMAP_MUX_MODE1 | OMAP_PIN_INPUT),
+	OMAP3_MUX(MCBSP1_DX, OMAP_MUX_MODE1 | OMAP_PIN_INPUT),
+	OMAP3_MUX(MCBSP1_DR, OMAP_MUX_MODE1 | OMAP_PIN_INPUT),
+	OMAP3_MUX(MCBSP1_FSX, OMAP_MUX_MODE1 | OMAP_PIN_INPUT_PULLUP),
+
+	/* McBSP 2 */
+	OMAP3_MUX(MCBSP2_FSX, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(MCBSP2_CLKX, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(MCBSP2_DR, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+	OMAP3_MUX(MCBSP2_DX, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+
+	/* serial ports */
+	OMAP3_MUX(MCBSP3_CLKX, OMAP_MUX_MODE1 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(MCBSP3_FSX, OMAP_MUX_MODE1 | OMAP_PIN_INPUT),
+	OMAP3_MUX(UART1_TX, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(UART1_RX, OMAP_MUX_MODE0 | OMAP_PIN_INPUT),
+
+	/* DSS */
+	OMAP3_MUX(DSS_PCLK, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_HSYNC, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_VSYNC, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_ACBIAS, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA0, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA1, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA2, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA3, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA4, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA5, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA6, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA7, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA8, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA9, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA10, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA11, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA12, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA13, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA14, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA15, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA16, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA17, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA18, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA19, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA20, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA21, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA22, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(DSS_DATA23, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+
+	/* display controls */
+	OMAP3_MUX(MCBSP1_FSR, OMAP_MUX_MODE4 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(GPMC_NCS7, OMAP_MUX_MODE4 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(GPMC_NCS3, OMAP_MUX_MODE4 | OMAP_PIN_OUTPUT),
+
+	/* TPS IRQ */
+	OMAP3_MUX(SYS_NIRQ, OMAP_MUX_MODE0 | OMAP_WAKEUP_EN | \
+		  OMAP_PIN_INPUT_PULLUP),
+
+	{ .reg_offset = OMAP_MUX_TERMINATOR },
+};
+
+static struct omap_musb_board_data musb_board_data = {
+	.interface_type		= MUSB_INTERFACE_ULPI,
+	.mode			= MUSB_OTG,
+	.power			= 100,
+};
 
 static void __init cm_t35_init(void)
 {
+	omap3_mux_init(board_mux, OMAP_PACKAGE_CUS);
 	omap_serial_init();
-	cm_t35_init_mux();
 	cm_t35_init_i2c();
 	cm_t35_init_nand();
 	cm_t35_init_ads7846();
 	cm_t35_init_ethernet();
 	cm_t35_init_led();
-	cm_t35_display_init();
+	cm_t35_init_display();
 
-	usb_musb_init();
-
-	omap_cfg_reg(AF26_34XX_SYS_NIRQ);
+	usb_musb_init(&musb_board_data);
 }
 
 MACHINE_START(CM_T35, "Compulab CM-T35")

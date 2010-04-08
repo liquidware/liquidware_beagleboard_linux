@@ -34,7 +34,6 @@
 #include <sys/uio.h>
 #include <termios.h>
 #include <getopt.h>
-#include <zlib.h>
 #include <assert.h>
 #include <sched.h>
 #include <limits.h>
@@ -304,7 +303,7 @@ static void *map_zeroed_pages(unsigned int num)
 	addr = mmap(NULL, getpagesize() * num,
 		    PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE, fd, 0);
 	if (addr == MAP_FAILED)
-		err(1, "Mmaping %u pages of /dev/zero", num);
+		err(1, "Mmapping %u pages of /dev/zero", num);
 
 	/*
 	 * One neat mmap feature is that you can close the fd, and it

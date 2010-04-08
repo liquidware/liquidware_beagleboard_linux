@@ -17,7 +17,7 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 You should have received a copy of the GNU General Public License along with this program; if not, write to the Free Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
-You shoud also find the complete GPL in the COPYING file accompanying this source code.
+You should also find the complete GPL in the COPYING file accompanying this source code.
 
 @endverbatim
 */
@@ -968,7 +968,7 @@ int i_APCI1500_ReadMoreDigitalInput(struct comedi_device *dev, struct comedi_sub
 
 	switch (data[0]) {
 	case 0:
-		if (ui_Channel >= 0 && ui_Channel <= 15) {
+		if (ui_Channel <= 15) {
 			ui_TmpValue =
 				(unsigned int) inw(devpriv->i_IobaseAddon +
 				APCI1500_DIGITAL_IP);

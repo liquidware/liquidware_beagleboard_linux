@@ -284,12 +284,12 @@ static ssize_t reiserfs_file_write(struct file *file,	/* the file we are going t
 const struct file_operations reiserfs_file_operations = {
 	.read = do_sync_read,
 	.write = reiserfs_file_write,
-	.ioctl = reiserfs_ioctl,
+	.unlocked_ioctl = reiserfs_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = reiserfs_compat_ioctl,
 #endif
 	.mmap = reiserfs_file_mmap,
-	.open = generic_file_open,
+	.open = dquot_file_open,
 	.release = reiserfs_file_release,
 	.fsync = reiserfs_sync_file,
 	.aio_read = generic_file_aio_read,

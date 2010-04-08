@@ -122,7 +122,9 @@ int __cpuinit __cpu_up(unsigned int cpu)
 	stack_start.bss_start = 0; /* don't clear bss for secondary cpus */
 	stack_start.start_kernel_fn = start_secondary;
 
-	flush_cache_all();
+	flush_icache_range((unsigned long)&stack_start,
+			   (unsigned long)&stack_start + sizeof(stack_start));
+	wmb();
 
 	plat_start_cpu(cpu, (unsigned long)_stext);
 
@@ -157,15 +159,6 @@ void __init smp_cpus_done(unsigned int max_cpus)
 void smp_send_reschedule(int cpu)
 {
 	plat_send_ipi(cpu, SMP_MSG_RESCHEDULE);
-}
-
-static void stop_this_cpu(void *unused)
-{
-	cpu_clear(smp_processor_id(), cpu_online_map);
-	local_irq_disable();
-
-	for (;;)
-		cpu_relax();
 }
 
 void smp_send_stop(void)

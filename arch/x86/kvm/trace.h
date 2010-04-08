@@ -56,6 +56,38 @@ TRACE_EVENT(kvm_hypercall,
 );
 
 /*
+ * Tracepoint for hypercall.
+ */
+TRACE_EVENT(kvm_hv_hypercall,
+	TP_PROTO(__u16 code, bool fast, __u16 rep_cnt, __u16 rep_idx,
+		 __u64 ingpa, __u64 outgpa),
+	TP_ARGS(code, fast, rep_cnt, rep_idx, ingpa, outgpa),
+
+	TP_STRUCT__entry(
+		__field(	__u16, 		code		)
+		__field(	bool,		fast		)
+		__field(	__u16,		rep_cnt		)
+		__field(	__u16,		rep_idx		)
+		__field(	__u64,		ingpa		)
+		__field(	__u64,		outgpa		)
+	),
+
+	TP_fast_assign(
+		__entry->code		= code;
+		__entry->fast		= fast;
+		__entry->rep_cnt	= rep_cnt;
+		__entry->rep_idx	= rep_idx;
+		__entry->ingpa		= ingpa;
+		__entry->outgpa		= outgpa;
+	),
+
+	TP_printk("code 0x%x %s cnt 0x%x idx 0x%x in 0x%llx out 0x%llx",
+		  __entry->code, __entry->fast ? "fast" : "slow",
+		  __entry->rep_cnt, __entry->rep_idx,  __entry->ingpa,
+		  __entry->outgpa)
+);
+
+/*
  * Tracepoint for PIO.
  */
 TRACE_EVENT(kvm_pio,
@@ -214,28 +246,33 @@ TRACE_EVENT(kvm_page_fault,
  * Tracepoint for guest MSR access.
  */
 TRACE_EVENT(kvm_msr,
-	TP_PROTO(unsigned int rw, unsigned int ecx, unsigned long data),
-	TP_ARGS(rw, ecx, data),
+	TP_PROTO(unsigned write, u32 ecx, u64 data, bool exception),
+	TP_ARGS(write, ecx, data, exception),
 
 	TP_STRUCT__entry(
-		__field(	unsigned int,	rw		)
-		__field(	unsigned int,	ecx		)
-		__field(	unsigned long,	data		)
+		__field(	unsigned,	write		)
+		__field(	u32,		ecx		)
+		__field(	u64,		data		)
+		__field(	u8,		exception	)
 	),
 
 	TP_fast_assign(
-		__entry->rw		= rw;
+		__entry->write		= write;
 		__entry->ecx		= ecx;
 		__entry->data		= data;
+		__entry->exception	= exception;
 	),
 
-	TP_printk("msr_%s %x = 0x%lx",
-		  __entry->rw ? "write" : "read",
-		  __entry->ecx, __entry->data)
+	TP_printk("msr_%s %x = 0x%llx%s",
+		  __entry->write ? "write" : "read",
+		  __entry->ecx, __entry->data,
+		  __entry->exception ? " (#GP)" : "")
 );
 
-#define trace_kvm_msr_read(ecx, data)		trace_kvm_msr(0, ecx, data)
-#define trace_kvm_msr_write(ecx, data)		trace_kvm_msr(1, ecx, data)
+#define trace_kvm_msr_read(ecx, data)      trace_kvm_msr(0, ecx, data, false)
+#define trace_kvm_msr_write(ecx, data)     trace_kvm_msr(1, ecx, data, false)
+#define trace_kvm_msr_read_ex(ecx)         trace_kvm_msr(0, ecx, 0, true)
+#define trace_kvm_msr_write_ex(ecx, data)  trace_kvm_msr(1, ecx, data, true)
 
 /*
  * Tracepoint for guest CR access.
@@ -347,6 +384,171 @@ TRACE_EVENT(kvm_apic_accept_irq,
 		  __print_symbolic((__entry->dm >> 8 & 0x7), kvm_deliver_mode),
 		  __entry->tm ? "level" : "edge",
 		  __entry->coalesced ? " (coalesced)" : "")
+);
+
+/*
+ * Tracepoint for nested VMRUN
+ */
+TRACE_EVENT(kvm_nested_vmrun,
+	    TP_PROTO(__u64 rip, __u64 vmcb, __u64 nested_rip, __u32 int_ctl,
+		     __u32 event_inj, bool npt),
+	    TP_ARGS(rip, vmcb, nested_rip, int_ctl, event_inj, npt),
+
+	TP_STRUCT__entry(
+		__field(	__u64,		rip		)
+		__field(	__u64,		vmcb		)
+		__field(	__u64,		nested_rip	)
+		__field(	__u32,		int_ctl		)
+		__field(	__u32,		event_inj	)
+		__field(	bool,		npt		)
+	),
+
+	TP_fast_assign(
+		__entry->rip		= rip;
+		__entry->vmcb		= vmcb;
+		__entry->nested_rip	= nested_rip;
+		__entry->int_ctl	= int_ctl;
+		__entry->event_inj	= event_inj;
+		__entry->npt		= npt;
+	),
+
+	TP_printk("rip: 0x%016llx vmcb: 0x%016llx nrip: 0x%016llx int_ctl: 0x%08x "
+		  "event_inj: 0x%08x npt: %s\n",
+		__entry->rip, __entry->vmcb, __entry->nested_rip,
+		__entry->int_ctl, __entry->event_inj,
+		__entry->npt ? "on" : "off")
+);
+
+/*
+ * Tracepoint for #VMEXIT while nested
+ */
+TRACE_EVENT(kvm_nested_vmexit,
+	    TP_PROTO(__u64 rip, __u32 exit_code,
+		     __u64 exit_info1, __u64 exit_info2,
+		     __u32 exit_int_info, __u32 exit_int_info_err),
+	    TP_ARGS(rip, exit_code, exit_info1, exit_info2,
+		    exit_int_info, exit_int_info_err),
+
+	TP_STRUCT__entry(
+		__field(	__u64,		rip			)
+		__field(	__u32,		exit_code		)
+		__field(	__u64,		exit_info1		)
+		__field(	__u64,		exit_info2		)
+		__field(	__u32,		exit_int_info		)
+		__field(	__u32,		exit_int_info_err	)
+	),
+
+	TP_fast_assign(
+		__entry->rip			= rip;
+		__entry->exit_code		= exit_code;
+		__entry->exit_info1		= exit_info1;
+		__entry->exit_info2		= exit_info2;
+		__entry->exit_int_info		= exit_int_info;
+		__entry->exit_int_info_err	= exit_int_info_err;
+	),
+	TP_printk("rip: 0x%016llx reason: %s ext_inf1: 0x%016llx "
+		  "ext_inf2: 0x%016llx ext_int: 0x%08x ext_int_err: 0x%08x\n",
+		  __entry->rip,
+		  ftrace_print_symbols_seq(p, __entry->exit_code,
+					   kvm_x86_ops->exit_reasons_str),
+		  __entry->exit_info1, __entry->exit_info2,
+		  __entry->exit_int_info, __entry->exit_int_info_err)
+);
+
+/*
+ * Tracepoint for #VMEXIT reinjected to the guest
+ */
+TRACE_EVENT(kvm_nested_vmexit_inject,
+	    TP_PROTO(__u32 exit_code,
+		     __u64 exit_info1, __u64 exit_info2,
+		     __u32 exit_int_info, __u32 exit_int_info_err),
+	    TP_ARGS(exit_code, exit_info1, exit_info2,
+		    exit_int_info, exit_int_info_err),
+
+	TP_STRUCT__entry(
+		__field(	__u32,		exit_code		)
+		__field(	__u64,		exit_info1		)
+		__field(	__u64,		exit_info2		)
+		__field(	__u32,		exit_int_info		)
+		__field(	__u32,		exit_int_info_err	)
+	),
+
+	TP_fast_assign(
+		__entry->exit_code		= exit_code;
+		__entry->exit_info1		= exit_info1;
+		__entry->exit_info2		= exit_info2;
+		__entry->exit_int_info		= exit_int_info;
+		__entry->exit_int_info_err	= exit_int_info_err;
+	),
+
+	TP_printk("reason: %s ext_inf1: 0x%016llx "
+		  "ext_inf2: 0x%016llx ext_int: 0x%08x ext_int_err: 0x%08x\n",
+		  ftrace_print_symbols_seq(p, __entry->exit_code,
+					   kvm_x86_ops->exit_reasons_str),
+		__entry->exit_info1, __entry->exit_info2,
+		__entry->exit_int_info, __entry->exit_int_info_err)
+);
+
+/*
+ * Tracepoint for nested #vmexit because of interrupt pending
+ */
+TRACE_EVENT(kvm_nested_intr_vmexit,
+	    TP_PROTO(__u64 rip),
+	    TP_ARGS(rip),
+
+	TP_STRUCT__entry(
+		__field(	__u64,	rip	)
+	),
+
+	TP_fast_assign(
+		__entry->rip	=	rip
+	),
+
+	TP_printk("rip: 0x%016llx\n", __entry->rip)
+);
+
+/*
+ * Tracepoint for nested #vmexit because of interrupt pending
+ */
+TRACE_EVENT(kvm_invlpga,
+	    TP_PROTO(__u64 rip, int asid, u64 address),
+	    TP_ARGS(rip, asid, address),
+
+	TP_STRUCT__entry(
+		__field(	__u64,	rip	)
+		__field(	int,	asid	)
+		__field(	__u64,	address	)
+	),
+
+	TP_fast_assign(
+		__entry->rip		=	rip;
+		__entry->asid		=	asid;
+		__entry->address	=	address;
+	),
+
+	TP_printk("rip: 0x%016llx asid: %d address: 0x%016llx\n",
+		  __entry->rip, __entry->asid, __entry->address)
+);
+
+/*
+ * Tracepoint for nested #vmexit because of interrupt pending
+ */
+TRACE_EVENT(kvm_skinit,
+	    TP_PROTO(__u64 rip, __u32 slb),
+	    TP_ARGS(rip, slb),
+
+	TP_STRUCT__entry(
+		__field(	__u64,	rip	)
+		__field(	__u32,	slb	)
+	),
+
+	TP_fast_assign(
+		__entry->rip		=	rip;
+		__entry->slb		=	slb;
+	),
+
+	TP_printk("rip: 0x%016llx slb: 0x%08x\n",
+		  __entry->rip, __entry->slb)
 );
 
 #endif /* _TRACE_KVM_H */

@@ -110,6 +110,8 @@
 #define EM2820_BOARD_SILVERCREST_WEBCAM           71
 #define EM2861_BOARD_GADMEI_UTV330PLUS           72
 #define EM2870_BOARD_REDDO_DVB_C_USB_BOX          73
+#define EM2800_BOARD_VC211A			  74
+#define EM2882_BOARD_DIKOM_DK300		  75
 
 /* Limits minimum and default number of buffers */
 #define EM28XX_MIN_BUF 4
@@ -142,9 +144,6 @@
    this is what I found out for all alternate numbers there!
  */
 #define EM28XX_NUM_PACKETS 40
-
-/* default alternate; 0 means choose the best */
-#define EM28XX_PINOUT 0
 
 #define EM28XX_INTERLACED_DEFAULT 1
 
@@ -554,7 +553,8 @@ struct em28xx {
 	int capture_type;
 	int vbi_read;
 	unsigned char cur_field;
-
+	unsigned int vbi_width;
+	unsigned int vbi_height; /* lines per field */
 
 	struct work_struct         request_module_wk;
 
@@ -615,7 +615,6 @@ struct em28xx {
 	struct em28xx_dvb *dvb;
 
 	/* I2C keyboard data */
-	struct i2c_board_info info;
 	struct IR_i2c_init_data init_data;
 };
 
@@ -646,6 +645,8 @@ int em28xx_write_regs_req(struct em28xx *dev, u8 req, u16 reg, char *buf,
 			  int len);
 int em28xx_write_regs(struct em28xx *dev, u16 reg, char *buf, int len);
 int em28xx_write_reg(struct em28xx *dev, u16 reg, u8 val);
+int em28xx_write_reg_bits(struct em28xx *dev, u16 reg, u8 val,
+				 u8 bitmask);
 
 int em28xx_read_ac97(struct em28xx *dev, u8 reg);
 int em28xx_write_ac97(struct em28xx *dev, u8 reg, u16 val);
@@ -669,9 +670,6 @@ int em28xx_gpio_set(struct em28xx *dev, struct em28xx_reg_seq *gpio);
 void em28xx_wake_i2c(struct em28xx *dev);
 void em28xx_remove_from_devlist(struct em28xx *dev);
 void em28xx_add_into_devlist(struct em28xx *dev);
-struct em28xx *em28xx_get_device(int minor,
-				 enum v4l2_buf_type *fh_type,
-				 int *has_radio);
 int em28xx_register_extension(struct em28xx_ops *dev);
 void em28xx_unregister_extension(struct em28xx_ops *dev);
 void em28xx_init_extension(struct em28xx *dev);
@@ -696,6 +694,8 @@ void em28xx_release_resources(struct em28xx *dev);
 int em28xx_get_key_terratec(struct IR_i2c *ir, u32 *ir_key, u32 *ir_raw);
 int em28xx_get_key_em_haup(struct IR_i2c *ir, u32 *ir_key, u32 *ir_raw);
 int em28xx_get_key_pinnacle_usb_grey(struct IR_i2c *ir, u32 *ir_key,
+				     u32 *ir_raw);
+int em28xx_get_key_winfast_usbii_deluxe(struct IR_i2c *ir, u32 *ir_key,
 				     u32 *ir_raw);
 void em28xx_register_snapshot_button(struct em28xx *dev);
 void em28xx_deregister_snapshot_button(struct em28xx *dev);
@@ -800,7 +800,7 @@ static inline unsigned int norm_maxw(struct em28xx *dev)
 	if (dev->board.is_webcam)
 		return dev->sensor_xres;
 
-	if (dev->board.max_range_640_480)
+	if (dev->board.max_range_640_480 || dev->board.is_em2800)
 		return 640;
 
 	return 720;

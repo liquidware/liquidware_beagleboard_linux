@@ -1,12 +1,14 @@
-#ifndef _PERF_SYMBOL_
-#define _PERF_SYMBOL_ 1
+#ifndef __PERF_SYMBOL
+#define __PERF_SYMBOL 1
 
 #include <linux/types.h>
+#include <stdbool.h>
 #include "types.h"
 #include <linux/list.h>
 #include <linux/rbtree.h>
-#include "module.h"
 #include "event.h"
+
+#define DEBUG_CACHE_DIR ".debug"
 
 #ifdef HAVE_CPLUS_DEMANGLE
 extern char *cplus_demangle(const char *, int);
@@ -46,57 +48,125 @@ struct symbol {
 	struct rb_node	rb_node;
 	u64		start;
 	u64		end;
-	u64		obj_start;
-	u64		hist_sum;
-	u64		*hist;
-	struct module	*module;
-	void		*priv;
 	char		name[0];
+};
+
+void symbol__delete(struct symbol *self);
+
+struct strlist;
+
+struct symbol_conf {
+	unsigned short	priv_size;
+	bool		try_vmlinux_path,
+			use_modules,
+			sort_by_name,
+			show_nr_samples,
+			use_callchain,
+			exclude_other,
+			full_paths;
+	const char	*vmlinux_name,
+			*field_sep;
+	char            *dso_list_str,
+			*comm_list_str,
+			*sym_list_str,
+			*col_width_list_str;
+       struct strlist	*dso_list,
+			*comm_list,
+			*sym_list;
+};
+
+extern struct symbol_conf symbol_conf;
+
+static inline void *symbol__priv(struct symbol *self)
+{
+	return ((void *)self) - symbol_conf.priv_size;
+}
+
+struct ref_reloc_sym {
+	const char	*name;
+	u64		addr;
+	u64		unrelocated_addr;
+};
+
+struct addr_location {
+	struct thread *thread;
+	struct map    *map;
+	struct symbol *sym;
+	u64	      addr;
+	char	      level;
+	bool	      filtered;
 };
 
 struct dso {
 	struct list_head node;
-	struct rb_root	 syms;
-	struct symbol    *(*find_symbol)(struct dso *, u64 ip);
-	unsigned int	 sym_priv_size;
-	unsigned char	 adjust_symbols;
-	unsigned char	 slen_calculated;
+	struct rb_root	 symbols[MAP__NR_TYPES];
+	struct rb_root	 symbol_names[MAP__NR_TYPES];
+	u8		 adjust_symbols:1;
+	u8		 slen_calculated:1;
+	u8		 has_build_id:1;
+	u8		 kernel:1;
+	u8		 hit:1;
 	unsigned char	 origin;
+	u8		 sorted_by_name;
+	u8		 loaded;
+	u8		 build_id[BUILD_ID_SIZE];
+	const char	 *short_name;
+	char	 	 *long_name;
+	u16		 long_name_len;
+	u16		 short_name_len;
 	char		 name[0];
 };
 
-extern const char *sym_hist_filter;
-
-typedef int (*symbol_filter_t)(struct dso *self, struct symbol *sym);
-
-struct dso *dso__new(const char *name, unsigned int sym_priv_size);
+struct dso *dso__new(const char *name);
+struct dso *dso__new_kernel(const char *name);
 void dso__delete(struct dso *self);
 
-static inline void *dso__sym_priv(struct dso *self, struct symbol *sym)
+bool dso__loaded(const struct dso *self, enum map_type type);
+bool dso__sorted_by_name(const struct dso *self, enum map_type type);
+
+static inline void dso__set_loaded(struct dso *self, enum map_type type)
 {
-	return ((void *)sym) - self->sym_priv_size;
+	self->loaded |= (1 << type);
 }
 
-struct symbol *dso__find_symbol(struct dso *self, u64 ip);
+void dso__sort_by_name(struct dso *self, enum map_type type);
 
-int dso__load_kernel(struct dso *self, const char *vmlinux,
-		     symbol_filter_t filter, int verbose, int modules);
-int dso__load_modules(struct dso *self, symbol_filter_t filter, int verbose);
-int dso__load(struct dso *self, symbol_filter_t filter, int verbose);
-struct dso *dsos__findnew(const char *name);
+extern struct list_head dsos__user, dsos__kernel;
+
+struct dso *__dsos__findnew(struct list_head *head, const char *name);
+
+static inline struct dso *dsos__findnew(const char *name)
+{
+	return __dsos__findnew(&dsos__user, name);
+}
+
+int dso__load(struct dso *self, struct map *map, symbol_filter_t filter);
+int dso__load_vmlinux_path(struct dso *self, struct map *map,
+			   symbol_filter_t filter);
+int dso__load_kallsyms(struct dso *self, const char *filename, struct map *map,
+		       symbol_filter_t filter);
 void dsos__fprintf(FILE *fp);
+size_t dsos__fprintf_buildid(FILE *fp, bool with_hits);
 
-size_t dso__fprintf(struct dso *self, FILE *fp);
+size_t dso__fprintf_buildid(struct dso *self, FILE *fp);
+size_t dso__fprintf(struct dso *self, enum map_type type, FILE *fp);
 char dso__symtab_origin(const struct dso *self);
+void dso__set_long_name(struct dso *self, char *name);
+void dso__set_build_id(struct dso *self, void *build_id);
+void dso__read_running_kernel_build_id(struct dso *self);
+struct symbol *dso__find_symbol(struct dso *self, enum map_type type, u64 addr);
+struct symbol *dso__find_symbol_by_name(struct dso *self, enum map_type type,
+					const char *name);
 
-int load_kernel(void);
+int filename__read_build_id(const char *filename, void *bf, size_t size);
+int sysfs__read_build_id(const char *filename, void *bf, size_t size);
+bool dsos__read_build_ids(bool with_hits);
+int build_id__sprintf(const u8 *self, int len, char *bf);
+int kallsyms__parse(const char *filename, void *arg,
+		    int (*process_symbol)(void *arg, const char *name,
+					  char type, u64 start));
 
-void symbol__init(void);
+int symbol__init(void);
+bool symbol_type__is_a(char symbol_type, enum map_type map_type);
 
-extern struct list_head dsos;
-extern struct dso *kernel_dso;
-extern struct dso *vdso;
-extern struct dso *hypervisor_dso;
-extern const char *vmlinux_name;
-extern int   modules;
-#endif /* _PERF_SYMBOL_ */
+#endif /* __PERF_SYMBOL */

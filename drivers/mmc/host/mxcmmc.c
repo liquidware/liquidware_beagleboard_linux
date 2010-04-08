@@ -4,7 +4,7 @@
  *  This is a driver for the SDHC controller found in Freescale MX2/MX3
  *  SoCs. It is basically the same hardware as found on MX1 (imxmmc.c).
  *  Unlike the hardware found on MX1, this hardware just works and does
- *  not need all the quirks found in imxmmc.c, hence the seperate driver.
+ *  not need all the quirks found in imxmmc.c, hence the separate driver.
  *
  *  Copyright (C) 2008 Sascha Hauer, Pengutronix <s.hauer@pengutronix.de>
  *  Copyright (C) 2006 Pavel Pisa, PiKRON <ppisa@pikron.com>
@@ -679,17 +679,17 @@ static int mxcmci_probe(struct platform_device *pdev)
 {
 	struct mmc_host *mmc;
 	struct mxcmci_host *host = NULL;
-	struct resource *r;
+	struct resource *iores, *r;
 	int ret = 0, irq;
 
 	printk(KERN_INFO "i.MX SDHC driver\n");
 
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	iores = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	irq = platform_get_irq(pdev, 0);
-	if (!r || irq < 0)
+	if (!iores || irq < 0)
 		return -EINVAL;
 
-	r = request_mem_region(r->start, resource_size(r), pdev->name);
+	r = request_mem_region(iores->start, resource_size(iores), pdev->name);
 	if (!r)
 		return -EBUSY;
 
@@ -708,7 +708,7 @@ static int mxcmci_probe(struct platform_device *pdev)
 	mmc->max_blk_size = 2048;
 	mmc->max_blk_count = 65535;
 	mmc->max_req_size = mmc->max_blk_size * mmc->max_blk_count;
-	mmc->max_seg_size = mmc->max_seg_size;
+	mmc->max_seg_size = mmc->max_req_size;
 
 	host = mmc_priv(mmc);
 	host->base = ioremap(r->start, resource_size(r));
@@ -809,7 +809,7 @@ out_iounmap:
 out_free:
 	mmc_free_host(mmc);
 out_release_mem:
-	release_mem_region(host->res->start, resource_size(host->res));
+	release_mem_region(iores->start, resource_size(iores));
 	return ret;
 }
 

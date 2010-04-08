@@ -327,7 +327,6 @@ static int netlbl_unlhsh_add_addr4(struct netlbl_unlhsh_iface *iface,
 	entry->list.addr = addr->s_addr & mask->s_addr;
 	entry->list.mask = mask->s_addr;
 	entry->list.valid = 1;
-	INIT_RCU_HEAD(&entry->rcu);
 	entry->secid = secid;
 
 	spin_lock(&netlbl_unlhsh_lock);
@@ -373,7 +372,6 @@ static int netlbl_unlhsh_add_addr6(struct netlbl_unlhsh_iface *iface,
 	entry->list.addr.s6_addr32[3] &= mask->s6_addr32[3];
 	ipv6_addr_copy(&entry->list.mask, mask);
 	entry->list.valid = 1;
-	INIT_RCU_HEAD(&entry->rcu);
 	entry->secid = secid;
 
 	spin_lock(&netlbl_unlhsh_lock);
@@ -410,7 +408,6 @@ static struct netlbl_unlhsh_iface *netlbl_unlhsh_add_iface(int ifindex)
 	INIT_LIST_HEAD(&iface->addr4_list);
 	INIT_LIST_HEAD(&iface->addr6_list);
 	iface->valid = 1;
-	INIT_RCU_HEAD(&iface->rcu);
 
 	spin_lock(&netlbl_unlhsh_lock);
 	if (ifindex > 0) {
@@ -472,13 +469,12 @@ int netlbl_unlhsh_add(struct net *net,
 
 	rcu_read_lock();
 	if (dev_name != NULL) {
-		dev = dev_get_by_name(net, dev_name);
+		dev = dev_get_by_name_rcu(net, dev_name);
 		if (dev == NULL) {
 			ret_val = -ENODEV;
 			goto unlhsh_add_return;
 		}
 		ifindex = dev->ifindex;
-		dev_put(dev);
 		iface = netlbl_unlhsh_search_iface(ifindex);
 	} else {
 		ifindex = 0;
@@ -737,13 +733,12 @@ int netlbl_unlhsh_remove(struct net *net,
 
 	rcu_read_lock();
 	if (dev_name != NULL) {
-		dev = dev_get_by_name(net, dev_name);
+		dev = dev_get_by_name_rcu(net, dev_name);
 		if (dev == NULL) {
 			ret_val = -ENODEV;
 			goto unlhsh_remove_return;
 		}
 		iface = netlbl_unlhsh_search_iface(dev->ifindex);
-		dev_put(dev);
 	} else
 		iface = rcu_dereference(netlbl_unlhsh_def);
 	if (iface == NULL) {
@@ -1552,7 +1547,7 @@ int netlbl_unlabel_getattr(const struct sk_buff *skb,
 	struct netlbl_unlhsh_iface *iface;
 
 	rcu_read_lock();
-	iface = netlbl_unlhsh_search_iface_def(skb->iif);
+	iface = netlbl_unlhsh_search_iface_def(skb->skb_iif);
 	if (iface == NULL)
 		goto unlabel_getattr_nolabel;
 	switch (family) {

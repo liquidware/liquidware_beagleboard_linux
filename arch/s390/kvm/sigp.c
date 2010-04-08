@@ -172,7 +172,7 @@ static int __sigp_set_arch(struct kvm_vcpu *vcpu, u32 parameter)
 		rc = 0; /* order accepted */
 		break;
 	default:
-		rc = -ENOTSUPP;
+		rc = -EOPNOTSUPP;
 	}
 	return rc;
 }
@@ -188,9 +188,9 @@ static int __sigp_set_prefix(struct kvm_vcpu *vcpu, u16 cpu_addr, u32 address,
 
 	/* make sure that the new value is valid memory */
 	address = address & 0x7fffe000u;
-	if ((copy_from_guest(vcpu, &tmp,
-		(u64) (address + vcpu->arch.sie_block->gmsor) , 1)) ||
-	   (copy_from_guest(vcpu, &tmp, (u64) (address +
+	if ((copy_from_user(&tmp, (void __user *)
+		(address + vcpu->arch.sie_block->gmsor) , 1)) ||
+	   (copy_from_user(&tmp, (void __user *)(address +
 			vcpu->arch.sie_block->gmsor + PAGE_SIZE), 1))) {
 		*reg |= SIGP_STAT_INVALID_PARAMETER;
 		return 1; /* invalid parameter */
@@ -293,7 +293,7 @@ int kvm_s390_handle_sigp(struct kvm_vcpu *vcpu)
 		vcpu->stat.instruction_sigp_restart++;
 		/* user space must know about restart */
 	default:
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 	}
 
 	if (rc < 0)

@@ -21,7 +21,10 @@
 #include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/input.h>
+
 #include <asm/xen/hypervisor.h>
+
+#include <xen/xen.h>
 #include <xen/events.h>
 #include <xen/page.h>
 #include <xen/interface/io/fbif.h>
@@ -318,7 +321,7 @@ InitWait:
 	}
 }
 
-static struct xenbus_device_id xenkbd_ids[] = {
+static const struct xenbus_device_id xenkbd_ids[] = {
 	{ "vkbd" },
 	{ "" }
 };

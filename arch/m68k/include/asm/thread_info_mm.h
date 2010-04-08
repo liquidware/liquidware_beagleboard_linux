@@ -4,9 +4,11 @@
 #ifndef ASM_OFFSETS_C
 #include <asm/asm-offsets.h>
 #endif
-#include <asm/current.h>
 #include <asm/types.h>
 #include <asm/page.h>
+
+#ifndef __ASSEMBLY__
+#include <asm/current.h>
 
 struct thread_info {
 	struct task_struct	*task;		/* main task structure */
@@ -14,8 +16,10 @@ struct thread_info {
 	struct exec_domain	*exec_domain;	/* execution domain */
 	int			preempt_count;	/* 0 => preemptable, <0 => BUG */
 	__u32 cpu; /* should always be 0 on m68k */
+	unsigned long		tp_value;	/* thread pointer */
 	struct restart_block    restart_block;
 };
+#endif /* __ASSEMBLY__ */
 
 #define PREEMPT_ACTIVE		0x4000000
 

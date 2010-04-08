@@ -49,6 +49,17 @@ Who:	Robin Getz <rgetz@blackfin.uclinux.org> & Matt Mackall <mpm@selenic.com>
 
 ---------------------------
 
+What:	Deprecated snapshot ioctls
+When:	2.6.36
+
+Why:	The ioctls in kernel/power/user.c were marked as deprecated long time
+	ago. Now they notify users about that so that they need to replace
+	their userspace. After some more time, remove them completely.
+
+Who:	Jiri Slaby <jirislaby@gmail.com>
+
+---------------------------
+
 What:	The ieee80211_regdom module parameter
 When:	March 2010 / desktop catchup
 
@@ -68,27 +79,6 @@ Why:	This was inherited by the CONFIG_WIRELESS_OLD_REGULATORY code,
 	this we will no longer need this module parameter. This entry hopes that
 	by the super-futuristically looking date of "March 2010" we will have
 	such replacements widely available.
-
-Who:	Luis R. Rodriguez <lrodriguez@atheros.com>
-
----------------------------
-
-What:	CONFIG_WIRELESS_OLD_REGULATORY - old static regulatory information
-When:	March 2010 / desktop catchup
-
-Why:	The old regulatory infrastructure has been replaced with a new one
-	which does not require statically defined regulatory domains. We do
-	not want to keep static regulatory domains in the kernel due to the
-	the dynamic nature of regulatory law and localization. We kept around
-	the old static definitions for the regulatory domains of:
-
-		* US
-		* JP
-		* EU
-
-	and used by default the US when CONFIG_WIRELESS_OLD_REGULATORY was
-	set. We will remove this option once the standard Linux desktop catches
-	up with the new userspace APIs we have implemented.
 
 Who:	Luis R. Rodriguez <lrodriguez@atheros.com>
 
@@ -127,19 +117,25 @@ Who:	Mauro Carvalho Chehab <mchehab@infradead.org>
 ---------------------------
 
 What:	PCMCIA control ioctl (needed for pcmcia-cs [cardmgr, cardctl])
-When:	November 2005
+When:	2.6.35/2.6.36
 Files:	drivers/pcmcia/: pcmcia_ioctl.c
 Why:	With the 16-bit PCMCIA subsystem now behaving (almost) like a
 	normal hotpluggable bus, and with it using the default kernel
 	infrastructure (hotplug, driver core, sysfs) keeping the PCMCIA
 	control ioctl needed by cardmgr and cardctl from pcmcia-cs is
-	unnecessary, and makes further cleanups and integration of the
+	unnecessary and potentially harmful (it does not provide for
+	proper locking), and makes further cleanups and integration of the
 	PCMCIA subsystem into the Linux kernel device driver model more
 	difficult. The features provided by cardmgr and cardctl are either
 	handled by the kernel itself now or are available in the new
 	pcmciautils package available at
 	http://kernel.org/pub/linux/utils/kernel/pcmcia/
-Who:	Dominik Brodowski <linux@brodo.de>
+
+	For all architectures except ARM, the associated config symbol
+	has been removed from kernel 2.6.34; for ARM, it will be likely
+	be removed from kernel 2.6.35. The actual code will then likely
+	be removed from kernel 2.6.36.
+Who:	Dominik Brodowski <linux@dominikbrodowski.net>
 
 ---------------------------
 
@@ -276,22 +272,6 @@ Who:	Michael Buesch <mb@bu3sch.de>
 
 ---------------------------
 
-What:	usedac i386 kernel parameter
-When:	2.6.27
-Why:	replaced by allowdac and no dac combination
-Who:	Glauber Costa <gcosta@redhat.com>
-
----------------------------
-
-What: print_fn_descriptor_symbol()
-When: October 2009
-Why:  The %pF vsprintf format provides the same functionality in a
-      simpler way.  print_fn_descriptor_symbol() is deprecated but
-      still present to give out-of-tree modules time to change.
-Who:  Bjorn Helgaas <bjorn.helgaas@hp.com>
-
----------------------------
-
 What:	/sys/o2cb symlink
 When:	January 2010
 Why:	/sys/fs/o2cb is the proper location for this information - /sys/o2cb
@@ -299,18 +279,6 @@ Why:	/sys/fs/o2cb is the proper location for this information - /sys/o2cb
 	ocfs2-tools. 2 years should be sufficient time to phase in new versions
 	which know to look in /sys/fs/o2cb.
 Who:	ocfs2-devel@oss.oracle.com
-
----------------------------
-
-What:	SCTP_GET_PEER_ADDRS_NUM_OLD, SCTP_GET_PEER_ADDRS_OLD,
-	SCTP_GET_LOCAL_ADDRS_NUM_OLD, SCTP_GET_LOCAL_ADDRS_OLD
-When: 	June 2009
-Why:    A newer version of the options have been introduced in 2005 that
-	removes the limitions of the old API.  The sctp library has been
-        converted to use these new options at the same time.  Any user
-	space app that directly uses the old options should convert to using
-	the new options.
-Who:	Vlad Yasevich <vladislav.yasevich@hp.com>
 
 ---------------------------
 
@@ -404,15 +372,6 @@ Who:	Alex Chiang <achiang@hp.com>
 
 ---------------------------
 
-What:	i2c-voodoo3 driver
-When:	October 2009
-Why:	Superseded by tdfxfb. I2C/DDC support used to live in a separate
-	driver but this caused driver conflicts.
-Who:	Jean Delvare <khali@linux-fr.org>
-	Krzysztof Helt <krzysztof.h1@wp.pl>
-
----------------------------
-
 What:	CONFIG_RFKILL_INPUT
 When:	2.6.33
 Why:	Should be implemented in userspace, policy daemon.
@@ -489,3 +448,144 @@ Why:	With the recent innovations in CPU hardware acceleration technologies
 Who:	Alok N Kataria <akataria@vmware.com>
 
 ----------------------------
+
+What:	Support for lcd_switch and display_get in asus-laptop driver
+When:	March 2010
+Why:	These two features use non-standard interfaces. There are the
+	only features that really need multiple path to guess what's
+	the right method name on a specific laptop.
+
+	Removing them will allow to remove a lot of code an significantly
+	clean the drivers.
+
+	This will affect the backlight code which won't be able to know
+	if the backlight is on or off. The platform display file will also be
+	write only (like the one in eeepc-laptop).
+
+	This should'nt affect a lot of user because they usually know
+	when their display is on or off.
+
+Who:	Corentin Chary <corentin.chary@gmail.com>
+
+----------------------------
+
+What:	usbvideo quickcam_messenger driver
+When:	2.6.35
+Files:	drivers/media/video/usbvideo/quickcam_messenger.[ch]
+Why:	obsolete v4l1 driver replaced by gspca_stv06xx
+Who:	Hans de Goede <hdegoede@redhat.com>
+
+----------------------------
+
+What:	ov511 v4l1 driver
+When:	2.6.35
+Files:	drivers/media/video/ov511.[ch]
+Why:	obsolete v4l1 driver replaced by gspca_ov519
+Who:	Hans de Goede <hdegoede@redhat.com>
+
+----------------------------
+
+What:	w9968cf v4l1 driver
+When:	2.6.35
+Files:	drivers/media/video/w9968cf*.[ch]
+Why:	obsolete v4l1 driver replaced by gspca_ov519
+Who:	Hans de Goede <hdegoede@redhat.com>
+
+----------------------------
+
+What:	ovcamchip sensor framework
+When:	2.6.35
+Files:	drivers/media/video/ovcamchip/*
+Why:	Only used by obsoleted v4l1 drivers
+Who:	Hans de Goede <hdegoede@redhat.com>
+
+----------------------------
+
+What:	stv680 v4l1 driver
+When:	2.6.35
+Files:	drivers/media/video/stv680.[ch]
+Why:	obsolete v4l1 driver replaced by gspca_stv0680
+Who:	Hans de Goede <hdegoede@redhat.com>
+
+----------------------------
+
+What:	zc0301 v4l driver
+When:	2.6.35
+Files:	drivers/media/video/zc0301/*
+Why:	Duplicate functionality with the gspca_zc3xx driver, zc0301 only
+	supports 2 USB-ID's (because it only supports a limited set of
+	sensors) wich are also supported by the gspca_zc3xx driver
+	(which supports 53 USB-ID's in total)
+Who:	Hans de Goede <hdegoede@redhat.com>
+
+----------------------------
+
+What:	corgikbd, spitzkbd, tosakbd driver
+When:	2.6.35
+Files:	drivers/input/keyboard/{corgi,spitz,tosa}kbd.c
+Why:	We now have a generic GPIO based matrix keyboard driver that
+	are fully capable of handling all the keys on these devices.
+	The original drivers manipulate the GPIO registers directly
+	and so are difficult to maintain.
+Who:	Eric Miao <eric.y.miao@gmail.com>
+
+----------------------------
+
+What:	corgi_ssp and corgi_ts driver
+When:	2.6.35
+Files:	arch/arm/mach-pxa/corgi_ssp.c, drivers/input/touchscreen/corgi_ts.c
+Why:	The corgi touchscreen is now deprecated in favour of the generic
+	ads7846.c driver. The noise reduction technique used in corgi_ts.c,
+	that's to wait till vsync before ADC sampling, is also integrated into
+	ads7846 driver now. Provided that the original driver is not generic
+	and is difficult to maintain, it will be removed later.
+Who:	Eric Miao <eric.y.miao@gmail.com>
+
+----------------------------
+
+What:	capifs
+When:	February 2011
+Files:	drivers/isdn/capi/capifs.*
+Why:	udev fully replaces this special file system that only contains CAPI
+	NCCI TTY device nodes. User space (pppdcapiplugin) works without
+	noticing the difference.
+Who:	Jan Kiszka <jan.kiszka@web.de>
+
+----------------------------
+
+What:	KVM memory aliases support
+When:	July 2010
+Why:	Memory aliasing support is used for speeding up guest vga access
+	through the vga windows.
+
+	Modern userspace no longer uses this feature, so it's just bitrotted
+	code and can be removed with no impact.
+Who:	Avi Kivity <avi@redhat.com>
+
+----------------------------
+
+What:	KVM kernel-allocated memory slots
+When:	July 2010
+Why:	Since 2.6.25, kvm supports user-allocated memory slots, which are
+	much more flexible than kernel-allocated slots.  All current userspace
+	supports the newer interface and this code can be removed with no
+	impact.
+Who:	Avi Kivity <avi@redhat.com>
+
+----------------------------
+
+What:	KVM paravirt mmu host support
+When:	January 2011
+Why:	The paravirt mmu host support is slower than non-paravirt mmu, both
+	on newer and older hardware.  It is already not exposed to the guest,
+	and kept only for live migration purposes.
+Who:	Avi Kivity <avi@redhat.com>
+
+----------------------------
+
+What: 	"acpi=ht" boot option
+When:	2.6.35
+Why:	Useful in 2003, implementation is a hack.
+	Generally invoked by accident today.
+	Seen as doing more harm than good.
+Who:	Len Brown <len.brown@intel.com>

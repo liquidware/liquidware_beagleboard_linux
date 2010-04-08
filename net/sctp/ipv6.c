@@ -381,7 +381,6 @@ static void sctp_v6_copy_addrlist(struct list_head *addrlist,
 			addr->a.v6.sin6_scope_id = dev->ifindex;
 			addr->valid = 1;
 			INIT_LIST_HEAD(&addr->list);
-			INIT_RCU_HEAD(&addr->rcu);
 			list_add_tail(&addr->list, addrlist);
 		}
 	}
@@ -837,15 +836,16 @@ static int sctp_inet6_bind_verify(struct sctp_sock *opt, union sctp_addr *addr)
 		if (type & IPV6_ADDR_LINKLOCAL) {
 			if (!addr->v6.sin6_scope_id)
 				return 0;
-			dev = dev_get_by_index(&init_net, addr->v6.sin6_scope_id);
-			if (!dev)
-				return 0;
-			if (!ipv6_chk_addr(&init_net, &addr->v6.sin6_addr,
+			rcu_read_lock();
+			dev = dev_get_by_index_rcu(&init_net,
+						   addr->v6.sin6_scope_id);
+			if (!dev ||
+			    !ipv6_chk_addr(&init_net, &addr->v6.sin6_addr,
 					   dev, 0)) {
-				dev_put(dev);
+				rcu_read_unlock();
 				return 0;
 			}
-			dev_put(dev);
+			rcu_read_unlock();
 		} else if (type == IPV6_ADDR_MAPPED) {
 			if (!opt->v4mapped)
 				return 0;
@@ -873,10 +873,12 @@ static int sctp_inet6_send_verify(struct sctp_sock *opt, union sctp_addr *addr)
 		if (type & IPV6_ADDR_LINKLOCAL) {
 			if (!addr->v6.sin6_scope_id)
 				return 0;
-			dev = dev_get_by_index(&init_net, addr->v6.sin6_scope_id);
+			rcu_read_lock();
+			dev = dev_get_by_index_rcu(&init_net,
+						   addr->v6.sin6_scope_id);
+			rcu_read_unlock();
 			if (!dev)
 				return 0;
-			dev_put(dev);
 		}
 		af = opt->pf->af;
 	}
@@ -930,7 +932,6 @@ static struct inet_protosw sctpv6_seqpacket_protosw = {
 	.protocol      = IPPROTO_SCTP,
 	.prot 	       = &sctpv6_prot,
 	.ops           = &inet6_seqpacket_ops,
-	.capability    = -1,
 	.no_check      = 0,
 	.flags         = SCTP_PROTOSW_FLAG
 };
@@ -939,7 +940,6 @@ static struct inet_protosw sctpv6_stream_protosw = {
 	.protocol      = IPPROTO_SCTP,
 	.prot 	       = &sctpv6_prot,
 	.ops           = &inet6_seqpacket_ops,
-	.capability    = -1,
 	.no_check      = 0,
 	.flags         = SCTP_PROTOSW_FLAG,
 };

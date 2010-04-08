@@ -122,7 +122,6 @@ enum usb_interface_condition {
  *	number from the USB core by calling usb_register_dev().
  * @condition: binding state of the interface: not bound, binding
  *	(in probe()), bound to a driver, or unbinding (in disconnect())
- * @is_active: flag set when the interface is bound and not suspended.
  * @sysfs_files_created: sysfs attributes exist
  * @ep_devs_created: endpoint child pseudo-devices exist
  * @unregistering: flag set when the interface is being unregistered
@@ -135,8 +134,7 @@ enum usb_interface_condition {
  * @dev: driver model's view of this device
  * @usb_dev: if an interface is bound to the USB major, this will point
  *	to the sysfs representation for that device.
- * @pm_usage_cnt: PM usage counter for this interface; autosuspend is not
- *	allowed unless the counter is 0.
+ * @pm_usage_cnt: PM usage counter for this interface
  * @reset_ws: Used for scheduling resets from atomic context.
  * @reset_running: set to 1 if the interface is currently running a
  *      queued reset so that usb_cancel_queued_reset() doesn't try to
@@ -184,7 +182,6 @@ struct usb_interface {
 	int minor;			/* minor number this interface is
 					 * bound to */
 	enum usb_interface_condition condition;		/* state of binding */
-	unsigned is_active:1;		/* the interface is not suspended */
 	unsigned sysfs_files_created:1;	/* the sysfs attributes exist */
 	unsigned ep_devs_created:1;	/* endpoint "devices" exist */
 	unsigned unregistering:1;	/* unregistration is in progress */
@@ -192,6 +189,7 @@ struct usb_interface {
 	unsigned needs_altsetting0:1;	/* switch to altsetting 0 is pending */
 	unsigned needs_binding:1;	/* needs delayed unbind/rebind */
 	unsigned reset_running:1;
+	unsigned resetting_device:1;	/* true: bandwidth alloc after reset */
 
 	struct device dev;		/* interface specific device info */
 	struct device *usb_dev;
@@ -331,12 +329,14 @@ struct usb_bus {
 	u8 otg_port;			/* 0, or number of OTG/HNP port */
 	unsigned is_b_host:1;		/* true during some HNP roleswitches */
 	unsigned b_hnp_enable:1;	/* OTG: did A-Host enable HNP? */
+	unsigned sg_tablesize;		/* 0 or largest number of sg list entries */
 
 	int devnum_next;		/* Next open device number in
 					 * round-robin allocation */
 
 	struct usb_devmap devmap;	/* device address allocation map */
 	struct usb_device *root_hub;	/* Root hub */
+	struct usb_bus *hs_companion;	/* Companion EHCI bus, if any */
 	struct list_head bus_list;	/* list of busses */
 
 	int bandwidth_allocated;	/* on this bus: how much of the time
@@ -398,7 +398,6 @@ struct usb_tt;
  * @portnum: parent port number (origin 1)
  * @level: number of USB hub ancestors
  * @can_submit: URBs may be submitted
- * @discon_suspended: disconnected while suspended
  * @persist_enabled:  USB_PERSIST enabled for this device
  * @have_langid: whether string_langid is valid
  * @authorized: policy has said we can use it;
@@ -418,22 +417,15 @@ struct usb_tt;
  * @usbfs_dentry: usbfs dentry entry for the device
  * @maxchild: number of ports if hub
  * @children: child devices - USB devices that are attached to this hub
- * @pm_usage_cnt: usage counter for autosuspend
  * @quirks: quirks of the whole device
  * @urbnum: number of URBs submitted for the whole device
  * @active_duration: total time device is not suspended
- * @autosuspend: for delayed autosuspends
- * @autoresume: for autoresumes requested while in_interrupt
- * @pm_mutex: protects PM operations
  * @last_busy: time of last use
  * @autosuspend_delay: in jiffies
  * @connect_time: time device was first connected
- * @auto_pm: autosuspend/resume in progress
  * @do_remote_wakeup:  remote wakeup should be enabled
  * @reset_resume: needs reset instead of resume
  * @autosuspend_disabled: autosuspend disabled by the user
- * @autoresume_disabled: autoresume disabled by the user
- * @skip_sys_resume: skip the next system resume
  * @wusb_dev: if this is a Wireless USB device, link to the WUSB
  *	specific data for the device.
  * @slot_id: Slot ID assigned by xHCI
@@ -474,7 +466,6 @@ struct usb_device {
 	u8 level;
 
 	unsigned can_submit:1;
-	unsigned discon_suspended:1;
 	unsigned persist_enabled:1;
 	unsigned have_langid:1;
 	unsigned authorized:1;
@@ -498,27 +489,19 @@ struct usb_device {
 	int maxchild;
 	struct usb_device *children[USB_MAXCHILDREN];
 
-	int pm_usage_cnt;
 	u32 quirks;
 	atomic_t urbnum;
 
 	unsigned long active_duration;
 
 #ifdef CONFIG_PM
-	struct delayed_work autosuspend;
-	struct work_struct autoresume;
-	struct mutex pm_mutex;
-
 	unsigned long last_busy;
 	int autosuspend_delay;
 	unsigned long connect_time;
 
-	unsigned auto_pm:1;
 	unsigned do_remote_wakeup:1;
 	unsigned reset_resume:1;
 	unsigned autosuspend_disabled:1;
-	unsigned autoresume_disabled:1;
-	unsigned skip_sys_resume:1;
 #endif
 	struct wusb_dev *wusb_dev;
 	int slot_id;
@@ -529,9 +512,9 @@ extern struct usb_device *usb_get_dev(struct usb_device *dev);
 extern void usb_put_dev(struct usb_device *dev);
 
 /* USB device locking */
-#define usb_lock_device(udev)		down(&(udev)->dev.sem)
-#define usb_unlock_device(udev)		up(&(udev)->dev.sem)
-#define usb_trylock_device(udev)	down_trylock(&(udev)->dev.sem)
+#define usb_lock_device(udev)		device_lock(&(udev)->dev)
+#define usb_unlock_device(udev)		device_unlock(&(udev)->dev)
+#define usb_trylock_device(udev)	device_trylock(&(udev)->dev)
 extern int usb_lock_device_for_reset(struct usb_device *udev,
 				     const struct usb_interface *iface);
 
@@ -543,23 +526,15 @@ extern struct usb_device *usb_find_device(u16 vendor_id, u16 product_id);
 
 /* USB autosuspend and autoresume */
 #ifdef CONFIG_USB_SUSPEND
-extern int usb_autopm_set_interface(struct usb_interface *intf);
+extern int usb_enable_autosuspend(struct usb_device *udev);
+extern int usb_disable_autosuspend(struct usb_device *udev);
+
 extern int usb_autopm_get_interface(struct usb_interface *intf);
 extern void usb_autopm_put_interface(struct usb_interface *intf);
 extern int usb_autopm_get_interface_async(struct usb_interface *intf);
 extern void usb_autopm_put_interface_async(struct usb_interface *intf);
-
-static inline void usb_autopm_enable(struct usb_interface *intf)
-{
-	atomic_set(&intf->pm_usage_cnt, 0);
-	usb_autopm_set_interface(intf);
-}
-
-static inline void usb_autopm_disable(struct usb_interface *intf)
-{
-	atomic_set(&intf->pm_usage_cnt, 1);
-	usb_autopm_set_interface(intf);
-}
+extern void usb_autopm_get_interface_no_resume(struct usb_interface *intf);
+extern void usb_autopm_put_interface_no_suspend(struct usb_interface *intf);
 
 static inline void usb_mark_last_busy(struct usb_device *udev)
 {
@@ -568,12 +543,13 @@ static inline void usb_mark_last_busy(struct usb_device *udev)
 
 #else
 
-static inline int usb_autopm_set_interface(struct usb_interface *intf)
+static inline int usb_enable_autosuspend(struct usb_device *udev)
+{ return 0; }
+static inline int usb_disable_autosuspend(struct usb_device *udev)
 { return 0; }
 
 static inline int usb_autopm_get_interface(struct usb_interface *intf)
 { return 0; }
-
 static inline int usb_autopm_get_interface_async(struct usb_interface *intf)
 { return 0; }
 
@@ -581,9 +557,11 @@ static inline void usb_autopm_put_interface(struct usb_interface *intf)
 { }
 static inline void usb_autopm_put_interface_async(struct usb_interface *intf)
 { }
-static inline void usb_autopm_enable(struct usb_interface *intf)
+static inline void usb_autopm_get_interface_no_resume(
+		struct usb_interface *intf)
 { }
-static inline void usb_autopm_disable(struct usb_interface *intf)
+static inline void usb_autopm_put_interface_no_suspend(
+		struct usb_interface *intf)
 { }
 static inline void usb_mark_last_busy(struct usb_device *udev)
 { }
@@ -626,6 +604,10 @@ extern struct usb_interface *usb_ifnum_to_if(const struct usb_device *dev,
 		unsigned ifnum);
 extern struct usb_host_interface *usb_altnum_to_altsetting(
 		const struct usb_interface *intf, unsigned int altnum);
+extern struct usb_host_interface *usb_find_alt_setting(
+		struct usb_host_config *config,
+		unsigned int iface_num,
+		unsigned int alt_num);
 
 
 /**
@@ -1073,7 +1055,8 @@ typedef void (*usb_complete_t)(struct urb *);
  * @number_of_packets: Lists the number of ISO transfer buffers.
  * @interval: Specifies the polling interval for interrupt or isochronous
  *	transfers.  The units are frames (milliseconds) for full and low
- *	speed devices, and microframes (1/8 millisecond) for highspeed ones.
+ *	speed devices, and microframes (1/8 millisecond) for highspeed
+ *	and SuperSpeed devices.
  * @error_count: Returns the number of ISO transfers that reported errors.
  * @context: For use in completion functions.  This normally points to
  *	request-specific driver context.
@@ -1304,9 +1287,16 @@ static inline void usb_fill_bulk_urb(struct urb *urb,
  *
  * Initializes a interrupt urb with the proper information needed to submit
  * it to a device.
- * Note that high speed interrupt endpoints use a logarithmic encoding of
- * the endpoint interval, and express polling intervals in microframes
- * (eight per millisecond) rather than in frames (one per millisecond).
+ *
+ * Note that High Speed and SuperSpeed interrupt endpoints use a logarithmic
+ * encoding of the endpoint interval, and express polling intervals in
+ * microframes (eight per millisecond) rather than in frames (one per
+ * millisecond).
+ *
+ * Wireless USB also uses the logarithmic encoding, but specifies it in units of
+ * 128us instead of 125us.  For Wireless USB devices, the interval is passed
+ * through to the host controller, rather than being translated into microframe
+ * units.
  */
 static inline void usb_fill_int_urb(struct urb *urb,
 				    struct usb_device *dev,
@@ -1323,7 +1313,7 @@ static inline void usb_fill_int_urb(struct urb *urb,
 	urb->transfer_buffer_length = buffer_length;
 	urb->complete = complete_fn;
 	urb->context = context;
-	if (dev->speed == USB_SPEED_HIGH)
+	if (dev->speed == USB_SPEED_HIGH || dev->speed == USB_SPEED_SUPER)
 		urb->interval = 1 << (interval - 1);
 	else
 		urb->interval = interval;
@@ -1584,14 +1574,18 @@ extern void usb_register_notify(struct notifier_block *nb);
 extern void usb_unregister_notify(struct notifier_block *nb);
 
 #ifdef DEBUG
-#define dbg(format, arg...) printk(KERN_DEBUG "%s: " format "\n" , \
-	__FILE__ , ## arg)
+#define dbg(format, arg...)						\
+	printk(KERN_DEBUG "%s: " format "\n", __FILE__, ##arg)
 #else
-#define dbg(format, arg...) do {} while (0)
+#define dbg(format, arg...)						\
+do {									\
+	if (0)								\
+		printk(KERN_DEBUG "%s: " format "\n", __FILE__, ##arg); \
+} while (0)
 #endif
 
-#define err(format, arg...) printk(KERN_ERR KBUILD_MODNAME ": " \
-	format "\n" , ## arg)
+#define err(format, arg...)					\
+	printk(KERN_ERR KBUILD_MODNAME ": " format "\n", ##arg)
 
 /* debugfs stuff */
 extern struct dentry *usb_debug_root;

@@ -5,6 +5,7 @@
 #include <linux/trace_seq.h>
 #include <linux/percpu.h>
 #include <linux/hardirq.h>
+#include <linux/perf_event.h>
 
 struct trace_array;
 struct tracer;
@@ -57,6 +58,7 @@ struct trace_iterator {
 	/* The below is zeroed out in pipe_read */
 	struct trace_seq	seq;
 	struct trace_entry	*ent;
+	int			leftover;
 	int			cpu;
 	u64			ts;
 
@@ -117,12 +119,11 @@ struct ftrace_event_call {
 	struct dentry		*dir;
 	struct trace_event	*event;
 	int			enabled;
-	int			(*regfunc)(void *);
-	void			(*unregfunc)(void *);
+	int			(*regfunc)(struct ftrace_event_call *);
+	void			(*unregfunc)(struct ftrace_event_call *);
 	int			id;
-	int			(*raw_init)(void);
-	int			(*show_format)(struct ftrace_event_call *call,
-					       struct trace_seq *s);
+	const char		*print_fmt;
+	int			(*raw_init)(struct ftrace_event_call *);
 	int			(*define_fields)(struct ftrace_event_call *);
 	struct list_head	fields;
 	int			filter_active;
@@ -130,21 +131,18 @@ struct ftrace_event_call {
 	void			*mod;
 	void			*data;
 
-	atomic_t		profile_count;
-	int			(*profile_enable)(void);
-	void			(*profile_disable)(void);
+	int			perf_refcount;
+	int			(*perf_event_enable)(struct ftrace_event_call *);
+	void			(*perf_event_disable)(struct ftrace_event_call *);
 };
 
-#define FTRACE_MAX_PROFILE_SIZE	2048
-
-extern char			*trace_profile_buf;
-extern char			*trace_profile_buf_nmi;
+#define PERF_MAX_TRACE_SIZE	2048
 
 #define MAX_FILTER_PRED		32
 #define MAX_FILTER_STR_VAL	256	/* Should handle KSYM_SYMBOL_LEN */
 
 extern void destroy_preds(struct ftrace_event_call *call);
-extern int filter_match_preds(struct ftrace_event_call *call, void *rec);
+extern int filter_match_preds(struct event_filter *filter, void *rec);
 extern int filter_current_check_discard(struct ring_buffer *buffer,
 					struct ftrace_event_call *call,
 					void *rec,
@@ -157,11 +155,12 @@ enum {
 	FILTER_PTR_STRING,
 };
 
-extern int trace_define_field(struct ftrace_event_call *call,
-			      const char *type, const char *name,
-			      int offset, int size, int is_signed,
-			      int filter_type);
-extern int trace_define_common_fields(struct ftrace_event_call *call);
+extern int trace_event_raw_init(struct ftrace_event_call *call);
+extern int trace_define_field(struct ftrace_event_call *call, const char *type,
+			      const char *name, int offset, int size,
+			      int is_signed, int filter_type);
+extern int trace_add_event_call(struct ftrace_event_call *call);
+extern void trace_remove_event_call(struct ftrace_event_call *call);
 
 #define is_signed_type(type)	(((type)(-1)) < 0)
 
@@ -185,5 +184,31 @@ do {									\
 	} else								\
 		__trace_printk(ip, fmt, ##args);			\
 } while (0)
+
+#ifdef CONFIG_PERF_EVENTS
+struct perf_event;
+
+DECLARE_PER_CPU(struct pt_regs, perf_trace_regs);
+
+extern int perf_trace_enable(int event_id);
+extern void perf_trace_disable(int event_id);
+extern int ftrace_profile_set_filter(struct perf_event *event, int event_id,
+				     char *filter_str);
+extern void ftrace_profile_free_filter(struct perf_event *event);
+extern void *
+perf_trace_buf_prepare(int size, unsigned short type, int *rctxp,
+			 unsigned long *irq_flags);
+
+static inline void
+perf_trace_buf_submit(void *raw_data, int size, int rctx, u64 addr,
+		       u64 count, unsigned long irq_flags, struct pt_regs *regs)
+{
+	struct trace_entry *entry = raw_data;
+
+	perf_tp_event(entry->type, addr, count, raw_data, size, regs);
+	perf_swevent_put_recursion_context(rctx);
+	local_irq_restore(irq_flags);
+}
+#endif
 
 #endif /* _LINUX_FTRACE_EVENT_H */

@@ -45,7 +45,7 @@
  *
  * Similarly, @i_mutex is not always locked in 'ubifs_readpage()', e.g., the
  * read-ahead path does not lock it ("sys_read -> generic_file_aio_read ->
- * ondemand_readahead -> readpage"). In case of readahead, @I_LOCK flag is not
+ * ondemand_readahead -> readpage"). In case of readahead, @I_SYNC flag is not
  * set as well. However, UBIFS disables readahead.
  */
 
@@ -1011,7 +1011,7 @@ static int ubifs_writepage(struct page *page, struct writeback_control *wbc)
 	/* Is the page fully inside @i_size? */
 	if (page->index < end_index) {
 		if (page->index >= synced_i_size >> PAGE_CACHE_SHIFT) {
-			err = inode->i_sb->s_op->write_inode(inode, 1);
+			err = inode->i_sb->s_op->write_inode(inode, NULL);
 			if (err)
 				goto out_unlock;
 			/*
@@ -1039,7 +1039,7 @@ static int ubifs_writepage(struct page *page, struct writeback_control *wbc)
 	kunmap_atomic(kaddr, KM_USER0);
 
 	if (i_size > synced_i_size) {
-		err = inode->i_sb->s_op->write_inode(inode, 1);
+		err = inode->i_sb->s_op->write_inode(inode, NULL);
 		if (err)
 			goto out_unlock;
 	}
@@ -1242,7 +1242,7 @@ static int do_setattr(struct ubifs_info *c, struct inode *inode,
 	if (release)
 		ubifs_release_budget(c, &req);
 	if (IS_SYNC(inode))
-		err = inode->i_sb->s_op->write_inode(inode, 1);
+		err = inode->i_sb->s_op->write_inode(inode, NULL);
 	return err;
 
 out:
@@ -1316,7 +1316,7 @@ int ubifs_fsync(struct file *file, struct dentry *dentry, int datasync)
 	 * the inode unless this is a 'datasync()' call.
 	 */
 	if (!datasync || (inode->i_state & I_DIRTY_DATASYNC)) {
-		err = inode->i_sb->s_op->write_inode(inode, 1);
+		err = inode->i_sb->s_op->write_inode(inode, NULL);
 		if (err)
 			return err;
 	}
@@ -1389,7 +1389,6 @@ static ssize_t ubifs_aio_write(struct kiocb *iocb, const struct iovec *iov,
 			       unsigned long nr_segs, loff_t pos)
 {
 	int err;
-	ssize_t ret;
 	struct inode *inode = iocb->ki_filp->f_mapping->host;
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 
@@ -1397,17 +1396,7 @@ static ssize_t ubifs_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	if (err)
 		return err;
 
-	ret = generic_file_aio_write(iocb, iov, nr_segs, pos);
-	if (ret < 0)
-		return ret;
-
-	if (ret > 0 && (IS_SYNC(inode) || iocb->ki_filp->f_flags & O_SYNC)) {
-		err = ubifs_sync_wbufs_by_inode(c, inode);
-		if (err)
-			return err;
-	}
-
-	return ret;
+	return generic_file_aio_write(iocb, iov, nr_segs, pos);
 }
 
 static int ubifs_set_page_dirty(struct page *page)

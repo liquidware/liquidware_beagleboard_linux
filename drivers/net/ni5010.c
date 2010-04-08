@@ -377,7 +377,7 @@ static int ni5010_open(struct net_device *dev)
 
 	PRINTK2((KERN_DEBUG "%s: entering ni5010_open()\n", dev->name));
 
-	if (request_irq(dev->irq, &ni5010_interrupt, 0, boardname, dev)) {
+	if (request_irq(dev->irq, ni5010_interrupt, 0, boardname, dev)) {
 		printk(KERN_WARNING "%s: Cannot get irq %#2x\n", dev->name, dev->irq);
 		return -EAGAIN;
 	}
@@ -651,7 +651,8 @@ static void ni5010_set_multicast_list(struct net_device *dev)
 
 	PRINTK2((KERN_DEBUG "%s: entering set_multicast_list\n", dev->name));
 
-	if (dev->flags&IFF_PROMISC || dev->flags&IFF_ALLMULTI || dev->mc_list) {
+	if (dev->flags & IFF_PROMISC || dev->flags & IFF_ALLMULTI ||
+	    !netdev_mc_empty(dev)) {
 		outb(RMD_PROMISC, EDLC_RMODE); /* Enable promiscuous mode */
 		PRINTK((KERN_DEBUG "%s: Entering promiscuous mode\n", dev->name));
 	} else {

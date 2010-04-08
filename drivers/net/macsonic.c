@@ -62,7 +62,6 @@
 #include <asm/mac_via.h>
 
 static char mac_sonic_string[] = "macsonic";
-static struct platform_device *mac_sonic_device;
 
 #include "sonic.h"
 
@@ -140,7 +139,7 @@ static irqreturn_t macsonic_interrupt(int irq, void *dev_id)
 
 static int macsonic_open(struct net_device* dev)
 {
-	if (request_irq(dev->irq, &sonic_interrupt, IRQ_FLG_FAST, "sonic", dev)) {
+	if (request_irq(dev->irq, sonic_interrupt, IRQ_FLG_FAST, "sonic", dev)) {
 		printk(KERN_ERR "%s: unable to get IRQ %d.\n", dev->name, dev->irq);
 		return -EAGAIN;
 	}
@@ -149,7 +148,7 @@ static int macsonic_open(struct net_device* dev)
 	 * rupt as well, which must prevent re-entrance of the sonic handler.
 	 */
 	if (dev->irq == IRQ_AUTO_3)
-		if (request_irq(IRQ_NUBUS_9, &macsonic_interrupt, IRQ_FLG_FAST, "sonic", dev)) {
+		if (request_irq(IRQ_NUBUS_9, macsonic_interrupt, IRQ_FLG_FAST, "sonic", dev)) {
 			printk(KERN_ERR "%s: unable to get IRQ %d.\n", dev->name, IRQ_NUBUS_9);
 			free_irq(dev->irq, dev);
 			return -EAGAIN;
@@ -607,6 +606,7 @@ out:
 MODULE_DESCRIPTION("Macintosh SONIC ethernet driver");
 module_param(sonic_debug, int, 0);
 MODULE_PARM_DESC(sonic_debug, "macsonic debug level (1-4)");
+MODULE_ALIAS("platform:macsonic");
 
 #include "sonic.c"
 
@@ -627,44 +627,19 @@ static struct platform_driver mac_sonic_driver = {
 	.probe  = mac_sonic_probe,
 	.remove = __devexit_p(mac_sonic_device_remove),
 	.driver	= {
-		.name = mac_sonic_string,
+		.name	= mac_sonic_string,
+		.owner	= THIS_MODULE,
 	},
 };
 
 static int __init mac_sonic_init_module(void)
 {
-	int err;
-
-	if ((err = platform_driver_register(&mac_sonic_driver))) {
-		printk(KERN_ERR "Driver registration failed\n");
-		return err;
-	}
-
-	mac_sonic_device = platform_device_alloc(mac_sonic_string, 0);
-	if (!mac_sonic_device)
-		goto out_unregister;
-
-	if (platform_device_add(mac_sonic_device)) {
-		platform_device_put(mac_sonic_device);
-		mac_sonic_device = NULL;
-	}
-
-	return 0;
-
-out_unregister:
-	platform_driver_unregister(&mac_sonic_driver);
-
-	return -ENOMEM;
+	return platform_driver_register(&mac_sonic_driver);
 }
 
 static void __exit mac_sonic_cleanup_module(void)
 {
 	platform_driver_unregister(&mac_sonic_driver);
-
-	if (mac_sonic_device) {
-		platform_device_unregister(mac_sonic_device);
-		mac_sonic_device = NULL;
-	}
 }
 
 module_init(mac_sonic_init_module);

@@ -25,6 +25,8 @@
   Reset functions and helpers
 \*****************************/
 
+#include <asm/unaligned.h>
+
 #include <linux/pci.h> 		/* To determine if a card is pci-e */
 #include <linux/log2.h>
 #include "ath5k.h"
@@ -58,12 +60,11 @@ static inline int ath5k_hw_write_ofdm_timings(struct ath5k_hw *ah,
 		!(channel->hw_value & CHANNEL_OFDM));
 
 	/* Get coefficient
-	 * ALGO: coef = (5 * clock * carrier_freq) / 2)
+	 * ALGO: coef = (5 * clock / carrier_freq) / 2
 	 * we scale coef by shifting clock value by 24 for
 	 * better precision since we use integers */
 	/* TODO: Half/quarter rate */
-	clock =  ath5k_hw_htoclock(1, channel->hw_value & CHANNEL_TURBO);
-
+	clock =  (channel->hw_value & CHANNEL_TURBO) ? 80 : 40;
 	coef_scaled = ((5 * (clock << 24)) / 2) / channel->center_freq;
 
 	/* Get exponent
@@ -850,12 +851,15 @@ static void ath5k_hw_commit_eeprom_settings(struct ath5k_hw *ah,
 				AR5K_PHY_OFDM_SELFCORR_CYPWR_THR1,
 				AR5K_INIT_CYCRSSI_THR1);
 
-	/* I/Q correction
-	 * TODO: Per channel i/q infos ? */
-	AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_IQ,
-		AR5K_PHY_IQ_CORR_ENABLE |
-		(ee->ee_i_cal[ee_mode] << AR5K_PHY_IQ_CORR_Q_I_COFF_S) |
-		ee->ee_q_cal[ee_mode]);
+	/* I/Q correction (set enable bit last to match HAL sources) */
+	/* TODO: Per channel i/q infos ? */
+	if (ah->ah_ee_version >= AR5K_EEPROM_VERSION_4_0) {
+		AR5K_REG_WRITE_BITS(ah, AR5K_PHY_IQ, AR5K_PHY_IQ_CORR_Q_I_COFF,
+			    ee->ee_i_cal[ee_mode]);
+		AR5K_REG_WRITE_BITS(ah, AR5K_PHY_IQ, AR5K_PHY_IQ_CORR_Q_Q_COFF,
+			    ee->ee_q_cal[ee_mode]);
+		AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_IQ, AR5K_PHY_IQ_CORR_ENABLE);
+	}
 
 	/* Heavy clipping -disable for now */
 	if (ah->ah_ee_version >= AR5K_EEPROM_VERSION_5_1)
@@ -870,6 +874,7 @@ static void ath5k_hw_commit_eeprom_settings(struct ath5k_hw *ah,
 int ath5k_hw_reset(struct ath5k_hw *ah, enum nl80211_iftype op_mode,
 	struct ieee80211_channel *channel, bool change_channel)
 {
+	struct ath_common *common = ath5k_hw_common(ah);
 	u32 s_seq[10], s_ant, s_led[3], staid1_flags, tsf_up, tsf_lo;
 	u32 phy_tst1;
 	u8 mode, freq, ee_mode, ant[2];
@@ -1171,10 +1176,12 @@ int ath5k_hw_reset(struct ath5k_hw *ah, enum nl80211_iftype op_mode,
 	ath5k_hw_reg_write(ah, s_led[2], AR5K_GPIODO);
 
 	/* Restore sta_id flags and preserve our mac address*/
-	ath5k_hw_reg_write(ah, AR5K_LOW_ID(ah->ah_sta_id),
-						AR5K_STA_ID0);
-	ath5k_hw_reg_write(ah, staid1_flags | AR5K_HIGH_ID(ah->ah_sta_id),
-						AR5K_STA_ID1);
+	ath5k_hw_reg_write(ah,
+			   get_unaligned_le32(common->macaddr),
+			   AR5K_STA_ID0);
+	ath5k_hw_reg_write(ah,
+			   staid1_flags | get_unaligned_le16(common->macaddr + 4),
+			   AR5K_STA_ID1);
 
 
 	/*
@@ -1182,8 +1189,7 @@ int ath5k_hw_reset(struct ath5k_hw *ah, enum nl80211_iftype op_mode,
 	 */
 
 	/* Restore bssid and bssid mask */
-	/* XXX: add ah->aid once mac80211 gives this to us */
-	ath5k_hw_set_associd(ah, ah->ah_bssid, 0);
+	ath5k_hw_set_associd(ah);
 
 	/* Set PCU config */
 	ath5k_hw_set_opmode(ah);
@@ -1289,7 +1295,7 @@ int ath5k_hw_reset(struct ath5k_hw *ah, enum nl80211_iftype op_mode,
 	 * out and/or noise floor calibration might timeout.
 	 */
 	AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_AGCCTL,
-				AR5K_PHY_AGCCTL_CAL);
+				AR5K_PHY_AGCCTL_CAL | AR5K_PHY_AGCCTL_NF);
 
 	/* At the same time start I/Q calibration for QAM constellation
 	 * -no need for CCK- */
@@ -1310,23 +1316,12 @@ int ath5k_hw_reset(struct ath5k_hw *ah, enum nl80211_iftype op_mode,
 			channel->center_freq);
 	}
 
-	/*
-	 * If we run NF calibration before AGC, it always times out.
-	 * Binary HAL starts NF and AGC calibration at the same time
-	 * and only waits for AGC to finish. Also if AGC or NF cal.
-	 * times out, reset doesn't fail on binary HAL. I believe
-	 * that's wrong because since rx path is routed to a detector,
-	 * if cal. doesn't finish we won't have RX. Sam's HAL for AR5210/5211
-	 * enables noise floor calibration after offset calibration and if noise
-	 * floor calibration fails, reset fails. I believe that's
-	 * a better approach, we just need to find a polling interval
-	 * that suits best, even if reset continues we need to make
-	 * sure that rx path is ready.
-	 */
-	ath5k_hw_noise_floor_calibration(ah, channel->center_freq);
-
 	/* Restore antenna mode */
 	ath5k_hw_set_antenna_mode(ah, ah->ah_ant_mode);
+
+	/* Restore slot time and ACK timeouts */
+	if (ah->ah_coverage_class > 0)
+		ath5k_hw_set_coverage_class(ah, ah->ah_coverage_class);
 
 	/*
 	 * Configure QCUs/DCUs
@@ -1382,15 +1377,15 @@ int ath5k_hw_reset(struct ath5k_hw *ah, enum nl80211_iftype op_mode,
 	 * Set clocks to 32KHz operation and use an
 	 * external 32KHz crystal when sleeping if one
 	 * exists */
-	if (ah->ah_version == AR5K_AR5212)
-			ath5k_hw_set_sleep_clock(ah, true);
+	if (ah->ah_version == AR5K_AR5212 &&
+	    ah->ah_op_mode != NL80211_IFTYPE_AP)
+		ath5k_hw_set_sleep_clock(ah, true);
 
 	/*
-	 * Disable beacons and reset the register
+	 * Disable beacons and reset the TSF
 	 */
-	AR5K_REG_DISABLE_BITS(ah, AR5K_BEACON, AR5K_BEACON_ENABLE |
-			AR5K_BEACON_RESET_TSF);
-
+	AR5K_REG_DISABLE_BITS(ah, AR5K_BEACON, AR5K_BEACON_ENABLE);
+	ath5k_hw_reset_tsf(ah);
 	return 0;
 }
 

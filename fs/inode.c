@@ -8,7 +8,6 @@
 #include <linux/mm.h>
 #include <linux/dcache.h>
 #include <linux/init.h>
-#include <linux/quotaops.h>
 #include <linux/slab.h>
 #include <linux/writeback.h>
 #include <linux/module.h>
@@ -18,7 +17,6 @@
 #include <linux/hash.h>
 #include <linux/swap.h>
 #include <linux/security.h>
-#include <linux/ima.h>
 #include <linux/pagemap.h>
 #include <linux/cdev.h>
 #include <linux/bootmem.h>
@@ -114,7 +112,7 @@ static void wake_up_inode(struct inode *inode)
 	 * Prevent speculative execution through spin_unlock(&inode_lock);
 	 */
 	smp_mb();
-	wake_up_bit(&inode->i_state, __I_LOCK);
+	wake_up_bit(&inode->i_state, __I_NEW);
 }
 
 /**
@@ -157,11 +155,6 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 
 	if (security_inode_alloc(inode))
 		goto out;
-
-	/* allocate and initialize an i_integrity */
-	if (ima_inode_alloc(inode))
-		goto out_free_security;
-
 	spin_lock_init(&inode->i_lock);
 	lockdep_set_class(&inode->i_lock, &sb->s_type->i_lock_key);
 
@@ -201,9 +194,6 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 #endif
 
 	return 0;
-
-out_free_security:
-	security_inode_free(inode);
 out:
 	return -ENOMEM;
 }
@@ -235,7 +225,6 @@ static struct inode *alloc_inode(struct super_block *sb)
 void __destroy_inode(struct inode *inode)
 {
 	BUG_ON(inode_has_buffers(inode));
-	ima_inode_free(inode);
 	security_inode_free(inode);
 	fsnotify_inode_delete(inode);
 #ifdef CONFIG_FS_POSIX_ACL
@@ -324,7 +313,6 @@ void clear_inode(struct inode *inode)
 	BUG_ON(!(inode->i_state & I_FREEING));
 	BUG_ON(inode->i_state & I_CLEAR);
 	inode_sync_wait(inode);
-	vfs_dq_drop(inode);
 	if (inode->i_sb->s_op->clear_inode)
 		inode->i_sb->s_op->clear_inode(inode);
 	if (S_ISBLK(inode->i_mode) && inode->i_bdev)
@@ -700,17 +688,17 @@ void unlock_new_inode(struct inode *inode)
 	}
 #endif
 	/*
-	 * This is special!  We do not need the spinlock when clearing I_LOCK,
+	 * This is special!  We do not need the spinlock when clearing I_NEW,
 	 * because we're guaranteed that nobody else tries to do anything about
 	 * the state of the inode when it is locked, as we just created it (so
-	 * there can be no old holders that haven't tested I_LOCK).
+	 * there can be no old holders that haven't tested I_NEW).
 	 * However we must emit the memory barrier so that other CPUs reliably
-	 * see the clearing of I_LOCK after the other inode initialisation has
+	 * see the clearing of I_NEW after the other inode initialisation has
 	 * completed.
 	 */
 	smp_mb();
-	WARN_ON((inode->i_state & (I_LOCK|I_NEW)) != (I_LOCK|I_NEW));
-	inode->i_state &= ~(I_LOCK|I_NEW);
+	WARN_ON(!(inode->i_state & I_NEW));
+	inode->i_state &= ~I_NEW;
 	wake_up_inode(inode);
 }
 EXPORT_SYMBOL(unlock_new_inode);
@@ -741,7 +729,7 @@ static struct inode *get_new_inode(struct super_block *sb,
 				goto set_failed;
 
 			__inode_add_to_lists(sb, head, inode);
-			inode->i_state = I_LOCK|I_NEW;
+			inode->i_state = I_NEW;
 			spin_unlock(&inode_lock);
 
 			/* Return the locked inode with I_NEW set, the
@@ -788,7 +776,7 @@ static struct inode *get_new_inode_fast(struct super_block *sb,
 		if (!old) {
 			inode->i_ino = ino;
 			__inode_add_to_lists(sb, head, inode);
-			inode->i_state = I_LOCK|I_NEW;
+			inode->i_state = I_NEW;
 			spin_unlock(&inode_lock);
 
 			/* Return the locked inode with I_NEW set, the
@@ -1093,7 +1081,7 @@ int insert_inode_locked(struct inode *inode)
 	ino_t ino = inode->i_ino;
 	struct hlist_head *head = inode_hashtable + hash(sb, ino);
 
-	inode->i_state |= I_LOCK|I_NEW;
+	inode->i_state |= I_NEW;
 	while (1) {
 		struct hlist_node *node;
 		struct inode *old = NULL;
@@ -1130,7 +1118,7 @@ int insert_inode_locked4(struct inode *inode, unsigned long hashval,
 	struct super_block *sb = inode->i_sb;
 	struct hlist_head *head = inode_hashtable + hash(sb, hashval);
 
-	inode->i_state |= I_LOCK|I_NEW;
+	inode->i_state |= I_NEW;
 
 	while (1) {
 		struct hlist_node *node;
@@ -1221,8 +1209,6 @@ void generic_delete_inode(struct inode *inode)
 
 	if (op->delete_inode) {
 		void (*delete)(struct inode *) = op->delete_inode;
-		if (!is_bad_inode(inode))
-			vfs_dq_init(inode);
 		/* Filesystems implementing their own
 		 * s_op->delete_inode are required to call
 		 * truncate_inode_pages and clear_inode()
@@ -1520,7 +1506,7 @@ EXPORT_SYMBOL(inode_wait);
  * until the deletion _might_ have completed.  Callers are responsible
  * to recheck inode state.
  *
- * It doesn't matter if I_LOCK is not set initially, a call to
+ * It doesn't matter if I_NEW is not set initially, a call to
  * wake_up_inode() after removing from the hash list will DTRT.
  *
  * This is called with inode_lock held.
@@ -1528,8 +1514,8 @@ EXPORT_SYMBOL(inode_wait);
 static void __wait_on_freeing_inode(struct inode *inode)
 {
 	wait_queue_head_t *wq;
-	DEFINE_WAIT_BIT(wait, &inode->i_state, __I_LOCK);
-	wq = bit_waitqueue(&inode->i_state, __I_LOCK);
+	DEFINE_WAIT_BIT(wait, &inode->i_state, __I_NEW);
+	wq = bit_waitqueue(&inode->i_state, __I_NEW);
 	prepare_to_wait(wq, &wait.wait, TASK_UNINTERRUPTIBLE);
 	spin_unlock(&inode_lock);
 	schedule();

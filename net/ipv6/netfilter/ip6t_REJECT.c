@@ -169,7 +169,7 @@ send_unreach(struct net *net, struct sk_buff *skb_in, unsigned char code,
 	if (hooknum == NF_INET_LOCAL_OUT && skb_in->dev == NULL)
 		skb_in->dev = net->loopback_dev;
 
-	icmpv6_send(skb_in, ICMPV6_DEST_UNREACH, code, 0, NULL);
+	icmpv6_send(skb_in, ICMPV6_DEST_UNREACH, code, 0);
 }
 
 static unsigned int
@@ -223,8 +223,8 @@ static bool reject_tg6_check(const struct xt_tgchk_param *par)
 		return false;
 	} else if (rejinfo->with == IP6T_TCP_RESET) {
 		/* Must specify that it's a TCP packet */
-		if (e->ipv6.proto != IPPROTO_TCP
-		    || (e->ipv6.invflags & XT_INV_PROTO)) {
+		if (e->ipv6.proto != IPPROTO_TCP ||
+		    (e->ipv6.invflags & XT_INV_PROTO)) {
 			printk("ip6t_REJECT: TCP_RESET illegal for non-tcp\n");
 			return false;
 		}

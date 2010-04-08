@@ -3095,7 +3095,7 @@ static void nv_set_multicast(struct net_device *dev)
 	} else {
 		pff |= NVREG_PFF_MYADDR;
 
-		if (dev->flags & IFF_ALLMULTI || dev->mc_list) {
+		if (dev->flags & IFF_ALLMULTI || !netdev_mc_empty(dev)) {
 			u32 alwaysOff[2];
 			u32 alwaysOn[2];
 
@@ -3105,8 +3105,7 @@ static void nv_set_multicast(struct net_device *dev)
 			} else {
 				struct dev_mc_list *walk;
 
-				walk = dev->mc_list;
-				while (walk != NULL) {
+				netdev_for_each_mc_addr(walk, dev) {
 					u32 a, b;
 					a = le32_to_cpu(*(__le32 *) walk->dmi_addr);
 					b = le16_to_cpu(*(__le16 *) (&walk->dmi_addr[4]));
@@ -3114,7 +3113,6 @@ static void nv_set_multicast(struct net_device *dev)
 					alwaysOff[0] &= ~a;
 					alwaysOn[1] &= b;
 					alwaysOff[1] &= ~b;
-					walk = walk->next;
 				}
 			}
 			addr[0] = alwaysOn[0];
@@ -4004,7 +4002,7 @@ static int nv_request_irq(struct net_device *dev, int intr_test)
 				/* Request irq for rx handling */
 				sprintf(np->name_rx, "%s-rx", dev->name);
 				if (request_irq(np->msi_x_entry[NV_MSI_X_VECTOR_RX].vector,
-						&nv_nic_irq_rx, IRQF_SHARED, np->name_rx, dev) != 0) {
+						nv_nic_irq_rx, IRQF_SHARED, np->name_rx, dev) != 0) {
 					printk(KERN_INFO "forcedeth: request_irq failed for rx %d\n", ret);
 					pci_disable_msix(np->pci_dev);
 					np->msi_flags &= ~NV_MSI_X_ENABLED;
@@ -4013,7 +4011,7 @@ static int nv_request_irq(struct net_device *dev, int intr_test)
 				/* Request irq for tx handling */
 				sprintf(np->name_tx, "%s-tx", dev->name);
 				if (request_irq(np->msi_x_entry[NV_MSI_X_VECTOR_TX].vector,
-						&nv_nic_irq_tx, IRQF_SHARED, np->name_tx, dev) != 0) {
+						nv_nic_irq_tx, IRQF_SHARED, np->name_tx, dev) != 0) {
 					printk(KERN_INFO "forcedeth: request_irq failed for tx %d\n", ret);
 					pci_disable_msix(np->pci_dev);
 					np->msi_flags &= ~NV_MSI_X_ENABLED;
@@ -4022,7 +4020,7 @@ static int nv_request_irq(struct net_device *dev, int intr_test)
 				/* Request irq for link and timer handling */
 				sprintf(np->name_other, "%s-other", dev->name);
 				if (request_irq(np->msi_x_entry[NV_MSI_X_VECTOR_OTHER].vector,
-						&nv_nic_irq_other, IRQF_SHARED, np->name_other, dev) != 0) {
+						nv_nic_irq_other, IRQF_SHARED, np->name_other, dev) != 0) {
 					printk(KERN_INFO "forcedeth: request_irq failed for link %d\n", ret);
 					pci_disable_msix(np->pci_dev);
 					np->msi_flags &= ~NV_MSI_X_ENABLED;
@@ -6198,7 +6196,7 @@ static void nv_shutdown(struct pci_dev *pdev)
 #define nv_resume NULL
 #endif /* CONFIG_PM */
 
-static struct pci_device_id pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(pci_tbl) = {
 	{	/* nForce Ethernet Controller */
 		PCI_DEVICE(0x10DE, 0x01C3),
 		.driver_data = DEV_NEED_TIMERIRQ|DEV_NEED_LINKTIMER,

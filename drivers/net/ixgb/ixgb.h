@@ -75,18 +75,13 @@ struct ixgb_adapter;
 #include "ixgb_ee.h"
 #include "ixgb_ids.h"
 
+#define PFX "ixgb: "
+
 #ifdef _DEBUG_DRIVER_
-#define IXGB_DBG(args...) printk(KERN_DEBUG "ixgb: " args)
+#define IXGB_DBG(args...) printk(KERN_DEBUG PFX args)
 #else
 #define IXGB_DBG(args...)
 #endif
-
-#define PFX "ixgb: "
-#define DPRINTK(nlevel, klevel, fmt, args...) \
-	(void)((NETIF_MSG_##nlevel & adapter->msg_enable) && \
-	printk(KERN_##klevel PFX "%s: %s: " fmt, adapter->netdev->name, \
-		__func__ , ## args))
-
 
 /* TX/RX descriptor defines */
 #define DEFAULT_TXD      256
@@ -117,6 +112,7 @@ struct ixgb_buffer {
 	unsigned long time_stamp;
 	u16 length;
 	u16 next_to_watch;
+	u16 mapped_as_page;
 };
 
 struct ixgb_desc_ring {
@@ -183,7 +179,6 @@ struct ixgb_adapter {
 	struct napi_struct napi;
 	struct net_device *netdev;
 	struct pci_dev *pdev;
-	struct net_device_stats net_stats;
 
 	/* structs defined in ixgb_hw.h */
 	struct ixgb_hw hw;

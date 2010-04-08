@@ -265,9 +265,10 @@ static int hiddev_release(struct inode * inode, struct file * file)
 static int hiddev_open(struct inode *inode, struct file *file)
 {
 	struct hiddev_list *list;
-	int res;
+	int res, i;
 
-	int i = iminor(inode) - HIDDEV_MINOR_BASE;
+	lock_kernel();
+	i = iminor(inode) - HIDDEV_MINOR_BASE;
 
 	if (i >= HIDDEV_MINORS || i < 0 || !hiddev_table[i])
 		return -ENODEV;
@@ -313,10 +314,12 @@ static int hiddev_open(struct inode *inode, struct file *file)
 			usbhid_open(hid);
 		}
 
+	unlock_kernel();
 	return 0;
 bail:
 	file->private_data = NULL;
 	kfree(list);
+	unlock_kernel();
 	return res;
 }
 
@@ -450,7 +453,6 @@ static noinline int hiddev_ioctl_usage(struct hiddev *hiddev, unsigned int cmd, 
 	uref_multi = kmalloc(sizeof(struct hiddev_usage_ref_multi), GFP_KERNEL);
 	if (!uref_multi)
 		return -ENOMEM;
-	lock_kernel();
 	uref = &uref_multi->uref;
 	if (cmd == HIDIOCGUSAGES || cmd == HIDIOCSUSAGES) {
 		if (copy_from_user(uref_multi, user_arg,
@@ -528,7 +530,6 @@ static noinline int hiddev_ioctl_usage(struct hiddev *hiddev, unsigned int cmd, 
 
 		case HIDIOCGCOLLECTIONINDEX:
 			i = field->usage[uref->usage_index].collection_index;
-			unlock_kernel();
 			kfree(uref_multi);
 			return i;
 		case HIDIOCGUSAGES:
@@ -547,15 +548,12 @@ static noinline int hiddev_ioctl_usage(struct hiddev *hiddev, unsigned int cmd, 
 		}
 
 goodreturn:
-		unlock_kernel();
 		kfree(uref_multi);
 		return 0;
 fault:
-		unlock_kernel();
 		kfree(uref_multi);
 		return -EFAULT;
 inval:
-		unlock_kernel();
 		kfree(uref_multi);
 		return -EINVAL;
 	}

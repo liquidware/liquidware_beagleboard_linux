@@ -88,17 +88,15 @@ static const char *ipg_brand_name[] = {
 	"Sundance Technology ST2021 based NIC",
 	"Tamarack Microelectronics TC9020/9021 based NIC",
 	"Tamarack Microelectronics TC9020/9021 based NIC",
-	"D-Link NIC",
 	"D-Link NIC IP1000A"
 };
 
-static struct pci_device_id ipg_pci_tbl[] __devinitdata = {
+static DEFINE_PCI_DEVICE_TABLE(ipg_pci_tbl) = {
 	{ PCI_VDEVICE(SUNDANCE,	0x1023), 0 },
 	{ PCI_VDEVICE(SUNDANCE,	0x2021), 1 },
 	{ PCI_VDEVICE(SUNDANCE,	0x1021), 2 },
 	{ PCI_VDEVICE(DLINK,	0x9021), 3 },
-	{ PCI_VDEVICE(DLINK,	0x4000), 4 },
-	{ PCI_VDEVICE(DLINK,	0x4020), 5 },
+	{ PCI_VDEVICE(DLINK,	0x4020), 4 },
 	{ 0, }
 };
 
@@ -585,11 +583,11 @@ static void ipg_nic_set_multicast_list(struct net_device *dev)
 		receivemode = IPG_RM_RECEIVEALLFRAMES;
 	} else if ((dev->flags & IFF_ALLMULTI) ||
 		   ((dev->flags & IFF_MULTICAST) &&
-		    (dev->mc_count > IPG_MULTICAST_HASHTABLE_SIZE))) {
+		    (netdev_mc_count(dev) > IPG_MULTICAST_HASHTABLE_SIZE))) {
 		/* NIC to be configured to receive all multicast
 		 * frames. */
 		receivemode |= IPG_RM_RECEIVEMULTICAST;
-	} else if ((dev->flags & IFF_MULTICAST) && (dev->mc_count > 0)) {
+	} else if ((dev->flags & IFF_MULTICAST) && !netdev_mc_empty(dev)) {
 		/* NIC to be configured to receive selected
 		 * multicast addresses. */
 		receivemode |= IPG_RM_RECEIVEMULTICASTHASH;
@@ -610,8 +608,7 @@ static void ipg_nic_set_multicast_list(struct net_device *dev)
 	hashtable[1] = 0x00000000;
 
 	/* Cycle through all multicast addresses to filter. */
-	for (mc_list_ptr = dev->mc_list;
-	     mc_list_ptr != NULL; mc_list_ptr = mc_list_ptr->next) {
+	netdev_for_each_mc_addr(mc_list_ptr, dev) {
 		/* Calculate CRC result for each multicast address. */
 		hashindex = crc32_le(0xffffffff, mc_list_ptr->dmi_addr,
 				     ETH_ALEN);
@@ -738,16 +735,11 @@ static int ipg_get_rxbuff(struct net_device *dev, int entry)
 
 	IPG_DEBUG_MSG("_get_rxbuff\n");
 
-	skb = netdev_alloc_skb(dev, sp->rxsupport_size + NET_IP_ALIGN);
+	skb = netdev_alloc_skb_ip_align(dev, sp->rxsupport_size);
 	if (!skb) {
 		sp->rx_buff[entry] = NULL;
 		return -ENOMEM;
 	}
-
-	/* Adjust the data start location within the buffer to
-	 * align IP address field to a 16 byte boundary.
-	 */
-	skb_reserve(skb, NET_IP_ALIGN);
 
 	/* Associate the receive buffer with the IPG NIC. */
 	skb->dev = dev;
@@ -1756,7 +1748,7 @@ static int ipg_nic_open(struct net_device *dev)
 	/* Register the interrupt line to be used by the IPG within
 	 * the Linux system.
 	 */
-	rc = request_irq(pdev->irq, &ipg_interrupt_handler, IRQF_SHARED,
+	rc = request_irq(pdev->irq, ipg_interrupt_handler, IRQF_SHARED,
 			 dev->name, dev);
 	if (rc < 0) {
 		printk(KERN_INFO "%s: Error when requesting interrupt.\n",

@@ -108,6 +108,16 @@ do { \
 			    d_data); \
 } while(0)
 
+#define DBF_EVENT_DEVID(d_level, d_cdev, d_str, d_data...)	\
+do { \
+	struct ccw_dev_id __dev_id;			\
+	ccw_device_get_id(d_cdev, &__dev_id);		\
+	debug_sprintf_event(dasd_debug_area,		\
+			    d_level,					\
+			    "0.%x.%04x " d_str "\n",			\
+			    __dev_id.ssid, __dev_id.devno, d_data);	\
+} while (0)
+
 #define DBF_EXC(d_level, d_str, d_data...)\
 do { \
 	debug_sprintf_exception(dasd_debug_area, \
@@ -358,6 +368,7 @@ struct dasd_device {
 
 	/* Device state and target state. */
 	int state, target;
+	struct mutex state_mutex;
 	int stopped;		/* device (ccw_device_start) was stopped */
 
 	/* reference count. */
@@ -425,6 +436,10 @@ struct dasd_block {
 #define DASD_FLAG_OFFLINE	3	/* device is in offline processing */
 #define DASD_FLAG_EER_SNSS	4	/* A SNSS is required */
 #define DASD_FLAG_EER_IN_USE	5	/* A SNSS request is running */
+#define DASD_FLAG_DEVICE_RO	6	/* The device itself is read-only. Don't
+					 * confuse this with the user specified
+					 * read-only feature.
+					 */
 
 void dasd_put_device_wake(struct dasd_device *);
 
@@ -594,6 +609,12 @@ int dasd_generic_restore_device(struct ccw_device *);
 
 int dasd_generic_read_dev_chars(struct dasd_device *, int, void *, int);
 char *dasd_get_sense(struct irb *);
+
+void dasd_device_set_stop_bits(struct dasd_device *, int);
+void dasd_device_remove_stop_bits(struct dasd_device *, int);
+
+int dasd_device_is_ro(struct dasd_device *);
+
 
 /* externals in dasd_devmap.c */
 extern int dasd_max_devindex;

@@ -378,8 +378,8 @@ static void link_timeout(struct link *l_ptr)
 		struct tipc_msg *msg = buf_msg(l_ptr->first_out);
 		u32 length = msg_size(msg);
 
-		if ((msg_user(msg) == MSG_FRAGMENTER)
-		    && (msg_type(msg) == FIRST_FRAGMENT)) {
+		if ((msg_user(msg) == MSG_FRAGMENTER) &&
+		    (msg_type(msg) == FIRST_FRAGMENT)) {
 			length = msg_size(msg_get_wrapped(msg));
 		}
 		if (length) {
@@ -1882,6 +1882,15 @@ void tipc_recv_msg(struct sk_buff *head, struct tipc_bearer *tb_ptr)
 			     (msg_destnode(msg) != tipc_own_addr)))
 			goto cont;
 
+		/* Discard non-routeable messages destined for another node */
+
+		if (unlikely(!msg_isdata(msg) &&
+			     (msg_destnode(msg) != tipc_own_addr))) {
+			if ((msg_user(msg) != CONN_MANAGER) &&
+			    (msg_user(msg) != MSG_FRAGMENTER))
+				goto cont;
+		}
+
 		/* Locate unicast link endpoint that should handle message */
 
 		n_ptr = tipc_node_find(msg_prevnode(msg));
@@ -2788,8 +2797,8 @@ int tipc_link_recv_fragment(struct sk_buff **pending, struct sk_buff **fb,
 
 	/* Is there an incomplete message waiting for this fragment? */
 
-	while (pbuf && ((msg_seqno(buf_msg(pbuf)) != long_msg_seq_no)
-			|| (msg_orignode(fragm) != msg_orignode(buf_msg(pbuf))))) {
+	while (pbuf && ((msg_seqno(buf_msg(pbuf)) != long_msg_seq_no) ||
+			(msg_orignode(fragm) != msg_orignode(buf_msg(pbuf))))) {
 		prev = pbuf;
 		pbuf = pbuf->next;
 	}
@@ -3325,8 +3334,8 @@ static void link_print(struct link *l_ptr, struct print_buf *buf,
 				      (l_ptr->last_out)), l_ptr->out_queue_size);
 		if ((mod(msg_seqno(buf_msg(l_ptr->last_out)) -
 			 msg_seqno(buf_msg(l_ptr->first_out)))
-		     != (l_ptr->out_queue_size - 1))
-		    || (l_ptr->last_out->next != NULL)) {
+		     != (l_ptr->out_queue_size - 1)) ||
+		    (l_ptr->last_out->next != NULL)) {
 			tipc_printf(buf, "\nSend queue inconsistency\n");
 			tipc_printf(buf, "first_out= %x ", l_ptr->first_out);
 			tipc_printf(buf, "next_out= %x ", l_ptr->next_out);

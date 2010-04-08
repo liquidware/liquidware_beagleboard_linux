@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2003 - 2009 Intel Corporation. All rights reserved.
+ * Copyright(c) 2003 - 2010 Intel Corporation. All rights reserved.
  *
  * Portions of this file are derived from the ipw3945 project, as well
  * as portions of the ieee80211 subsystem header files.
@@ -52,6 +52,8 @@ void iwl_update_tkip_key(struct iwl_priv *priv,
 			const u8 *addr, u32 iv32, u16 *phase1key);
 
 int iwl_rxon_add_station(struct iwl_priv *priv, const u8 *addr, bool is_ap);
+void iwl_add_bcast_station(struct iwl_priv *priv);
+void iwl3945_add_bcast_station(struct iwl_priv *priv);
 int iwl_remove_station(struct iwl_priv *priv, const u8 *addr, bool is_ap);
 void iwl_clear_stations_table(struct iwl_priv *priv);
 int iwl_get_free_ucode_key_index(struct iwl_priv *priv);
@@ -65,5 +67,6 @@ void iwl_sta_tx_modify_enable_tid(struct iwl_priv *priv, int sta_id, int tid);
 int iwl_sta_rx_agg_start(struct iwl_priv *priv,
 			 const u8 *addr, int tid, u16 ssn);
 int iwl_sta_rx_agg_stop(struct iwl_priv *priv, const u8 *addr, int tid);
-void iwl_update_ps_mode(struct iwl_priv *priv, u16 ps_bit, u8 *addr);
+void iwl_sta_modify_ps_wake(struct iwl_priv *priv, int sta_id);
+void iwl_sta_modify_sleep_tx_count(struct iwl_priv *priv, int sta_id, int cnt);
 #endif /* __iwl_sta_h__ */

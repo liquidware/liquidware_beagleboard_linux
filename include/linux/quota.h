@@ -73,6 +73,8 @@
 /* Quota format type IDs */
 #define	QFMT_VFS_OLD 1
 #define	QFMT_VFS_V0 2
+#define QFMT_OCFS2 3
+#define	QFMT_VFS_V1 4
 
 /* Size of block in which space limits are passed through the quota
  * interface */
@@ -277,9 +279,6 @@ struct dquot {
 	struct mem_dqblk dq_dqb;	/* Diskquota usage */
 };
 
-#define QUOTA_OK          0
-#define NO_QUOTA          1
-
 /* Operations which must be implemented by each quota format */
 struct quota_format_ops {
 	int (*check_quota_file)(struct super_block *sb, int type);	/* Detect whether file is in our format */
@@ -293,13 +292,6 @@ struct quota_format_ops {
 
 /* Operations working with dquots */
 struct dquot_operations {
-	int (*initialize) (struct inode *, int);
-	int (*drop) (struct inode *);
-	int (*alloc_space) (struct inode *, qsize_t, int);
-	int (*alloc_inode) (const struct inode *, qsize_t);
-	int (*free_space) (struct inode *, qsize_t);
-	int (*free_inode) (const struct inode *, qsize_t);
-	int (*transfer) (struct inode *, struct iattr *);
 	int (*write_dquot) (struct dquot *);		/* Ordinary dquot write */
 	struct dquot *(*alloc_dquot)(struct super_block *, int);	/* Allocate memory for new dquot */
 	void (*destroy_dquot)(struct dquot *);		/* Free memory for dquot */
@@ -307,21 +299,16 @@ struct dquot_operations {
 	int (*release_dquot) (struct dquot *);		/* Quota is going to be deleted from disk */
 	int (*mark_dirty) (struct dquot *);		/* Dquot is marked dirty */
 	int (*write_info) (struct super_block *, int);	/* Write of quota "superblock" */
-	/* reserve quota for delayed block allocation */
-	int (*reserve_space) (struct inode *, qsize_t, int);
-	/* claim reserved quota for delayed alloc */
-	int (*claim_space) (struct inode *, qsize_t);
-	/* release rsved quota for delayed alloc */
-	void (*release_rsv) (struct inode *, qsize_t);
-	/* get reserved quota for delayed alloc */
-	qsize_t (*get_reserved_space) (struct inode *);
+	/* get reserved quota for delayed alloc, value returned is managed by
+	 * quota code only */
+	qsize_t *(*get_reserved_space) (struct inode *);
 };
 
 /* Operations handling requests from userspace */
 struct quotactl_ops {
 	int (*quota_on)(struct super_block *, int, int, char *, int);
 	int (*quota_off)(struct super_block *, int, int);
-	int (*quota_sync)(struct super_block *, int);
+	int (*quota_sync)(struct super_block *, int, int);
 	int (*get_info)(struct super_block *, int, struct if_dqinfo *);
 	int (*set_info)(struct super_block *, int, struct if_dqinfo *);
 	int (*get_dqblk)(struct super_block *, int, qid_t, struct if_dqblk *);
@@ -334,7 +321,7 @@ struct quotactl_ops {
 
 struct quota_format_type {
 	int qf_fmt_id;	/* Quota format id */
-	struct quota_format_ops *qf_ops;	/* Operations of format */
+	const struct quota_format_ops *qf_ops;	/* Operations of format */
 	struct module *qf_owner;		/* Module implementing quota format */
 	struct quota_format_type *qf_next;
 };
@@ -354,27 +341,37 @@ enum {
 #define DQUOT_STATE_FLAGS	(DQUOT_USAGE_ENABLED | DQUOT_LIMITS_ENABLED | \
 				 DQUOT_SUSPENDED)
 /* Other quota flags */
-#define DQUOT_QUOTA_SYS_FILE	(1 << 6)	/* Quota file is a special
+#define DQUOT_STATE_LAST	(_DQUOT_STATE_FLAGS * MAXQUOTAS)
+#define DQUOT_QUOTA_SYS_FILE	(1 << DQUOT_STATE_LAST)
+						/* Quota file is a special
 						 * system file and user cannot
 						 * touch it. Filesystem is
 						 * responsible for setting
 						 * S_NOQUOTA, S_NOATIME flags
 						 */
-#define DQUOT_NEGATIVE_USAGE	(1 << 7)	/* Allow negative quota usage */
+#define DQUOT_NEGATIVE_USAGE	(1 << (DQUOT_STATE_LAST + 1))
+					       /* Allow negative quota usage */
 
 static inline unsigned int dquot_state_flag(unsigned int flags, int type)
 {
-	if (type == USRQUOTA)
-		return flags;
-	return flags << _DQUOT_STATE_FLAGS;
+	return flags << _DQUOT_STATE_FLAGS * type;
 }
 
 static inline unsigned int dquot_generic_flag(unsigned int flags, int type)
 {
-	if (type == USRQUOTA)
-		return flags;
-	return flags >> _DQUOT_STATE_FLAGS;
+	return (flags >> _DQUOT_STATE_FLAGS * type) & DQUOT_STATE_FLAGS;
 }
+
+#ifdef CONFIG_QUOTA_NETLINK_INTERFACE
+extern void quota_send_warning(short type, unsigned int id, dev_t dev,
+			       const char warntype);
+#else
+static inline void quota_send_warning(short type, unsigned int id, dev_t dev,
+				      const char warntype)
+{
+	return;
+}
+#endif /* CONFIG_QUOTA_NETLINK_INTERFACE */
 
 struct quota_info {
 	unsigned int flags;			/* Flags for diskquotas on this device */
@@ -383,7 +380,7 @@ struct quota_info {
 	struct rw_semaphore dqptr_sem;		/* serialize ops using quota_info struct, pointers from inode to dquots */
 	struct inode *files[MAXQUOTAS];		/* inodes of quotafiles */
 	struct mem_dqinfo info[MAXQUOTAS];	/* Information for each quota type */
-	struct quota_format_ops *ops[MAXQUOTAS];	/* Operations for each type */
+	const struct quota_format_ops *ops[MAXQUOTAS];	/* Operations for each type */
 };
 
 int register_quota_format(struct quota_format_type *fmt);

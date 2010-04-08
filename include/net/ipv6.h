@@ -73,7 +73,6 @@
 #define IPV6_ADDR_SCOPE_MASK	0x00f0U
 
 #define IPV6_ADDR_MAPPED	0x1000U
-#define IPV6_ADDR_RESERVED	0x2000U	/* reserved address space */
 
 /*
  *	Addr scopes
@@ -160,8 +159,7 @@ extern struct ctl_path net_ipv6_ctl_path[];
 #define ICMP6MSGIN_INC_STATS_BH(net, idev, field)	\
 	_DEVINC(net, icmpv6msg, _BH, idev, field)
 
-struct ip6_ra_chain
-{
+struct ip6_ra_chain {
 	struct ip6_ra_chain	*next;
 	struct sock		*sk;
 	int			sel;
@@ -176,8 +174,7 @@ extern rwlock_t ip6_ra_lock;
    ancillary data and passed to IPv6.
  */
 
-struct ipv6_txoptions
-{
+struct ipv6_txoptions {
 	/* Length of this structure */
 	int			tot_len;
 
@@ -194,8 +191,7 @@ struct ipv6_txoptions
 	/* Option buffer, as read by IPV6_PKTOPTIONS, starts here. */
 };
 
-struct ip6_flowlabel
-{
+struct ip6_flowlabel {
 	struct ip6_flowlabel	*next;
 	__be32			label;
 	atomic_t		users;
@@ -212,8 +208,7 @@ struct ip6_flowlabel
 #define IPV6_FLOWINFO_MASK	cpu_to_be32(0x0FFFFFFF)
 #define IPV6_FLOWLABEL_MASK	cpu_to_be32(0x000FFFFF)
 
-struct ipv6_fl_socklist
-{
+struct ipv6_fl_socklist {
 	struct ipv6_fl_socklist	*next;
 	struct ip6_flowlabel	*fl;
 };
@@ -250,7 +245,9 @@ extern int ipv6_opt_accepted(struct sock *sk, struct sk_buff *skb);
 int ip6_frag_nqueues(struct net *net);
 int ip6_frag_mem(struct net *net);
 
-#define IPV6_FRAG_TIMEOUT	(60*HZ)		/* 60 seconds */
+#define IPV6_FRAG_HIGH_THRESH	(256 * 1024)	/* 262144 */
+#define IPV6_FRAG_LOW_THRESH	(192 * 1024)	/* 196608 */
+#define IPV6_FRAG_TIMEOUT	(60 * HZ)	/* 60 seconds */
 
 extern int __ipv6_addr_type(const struct in6_addr *addr);
 static inline int ipv6_addr_type(const struct in6_addr *addr)
@@ -354,8 +351,19 @@ static inline int ipv6_prefix_equal(const struct in6_addr *a1,
 
 struct inet_frag_queue;
 
+enum ip6_defrag_users {
+	IP6_DEFRAG_LOCAL_DELIVER,
+	IP6_DEFRAG_CONNTRACK_IN,
+	__IP6_DEFRAG_CONNTRACK_IN	= IP6_DEFRAG_CONNTRACK_IN + USHORT_MAX,
+	IP6_DEFRAG_CONNTRACK_OUT,
+	__IP6_DEFRAG_CONNTRACK_OUT	= IP6_DEFRAG_CONNTRACK_OUT + USHORT_MAX,
+	IP6_DEFRAG_CONNTRACK_BRIDGE_IN,
+	__IP6_DEFRAG_CONNTRACK_BRIDGE_IN = IP6_DEFRAG_CONNTRACK_BRIDGE_IN + USHORT_MAX,
+};
+
 struct ip6_create_arg {
 	__be32 id;
+	u32 user;
 	struct in6_addr *src;
 	struct in6_addr *dst;
 };

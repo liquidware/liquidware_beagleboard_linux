@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2008, Intel Corp.
+ * Copyright (C) 2000 - 2010, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -170,14 +170,12 @@ acpi_ex_load_table_op(struct acpi_walk_state *walk_state,
 
 		/* Table not found, return an Integer=0 and AE_OK */
 
-		ddb_handle = acpi_ut_create_internal_object(ACPI_TYPE_INTEGER);
+		ddb_handle = acpi_ut_create_integer_object((u64) 0);
 		if (!ddb_handle) {
 			return_ACPI_STATUS(AE_NO_MEMORY);
 		}
 
-		ddb_handle->integer.value = 0;
 		*return_desc = ddb_handle;
-
 		return_ACPI_STATUS(AE_OK);
 	}
 
@@ -286,7 +284,7 @@ static acpi_status
 acpi_ex_region_read(union acpi_operand_object *obj_desc, u32 length, u8 *buffer)
 {
 	acpi_status status;
-	acpi_integer value;
+	u64 value;
 	u32 region_offset = 0;
 	u32 i;
 
@@ -492,7 +490,11 @@ acpi_ex_load_op(union acpi_operand_object *obj_desc,
 
 	status = acpi_tb_add_table(&table_desc, &table_index);
 	if (ACPI_FAILURE(status)) {
-		goto cleanup;
+
+		/* Delete allocated table buffer */
+
+		acpi_tb_delete_table(&table_desc);
+		return_ACPI_STATUS(status);
 	}
 
 	/*
@@ -535,13 +537,6 @@ acpi_ex_load_op(union acpi_operand_object *obj_desc,
 					     acpi_gbl_table_handler_context);
 	}
 
-      cleanup:
-	if (ACPI_FAILURE(status)) {
-
-		/* Delete allocated table buffer */
-
-		acpi_tb_delete_table(&table_desc);
-	}
 	return_ACPI_STATUS(status);
 }
 

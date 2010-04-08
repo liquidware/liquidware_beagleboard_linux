@@ -55,6 +55,10 @@ static struct platform_device omap_fb_device = {
 	.num_resources = 0,
 };
 
+void omapfb_set_platform_data(struct omapfb_platform_data *data)
+{
+}
+
 static inline int ranges_overlap(unsigned long start1, unsigned long size1,
 				 unsigned long start2, unsigned long size2)
 {
@@ -366,6 +370,10 @@ unsigned long omapfb_reserve_sram(unsigned long sram_pstart,
 }
 
 #else
+
+void omapfb_set_platform_data(struct omapfb_platform_data *data)
+{
+}
 
 void omapfb_reserve_sdram(void) {}
 unsigned long omapfb_reserve_sram(unsigned long sram_pstart,

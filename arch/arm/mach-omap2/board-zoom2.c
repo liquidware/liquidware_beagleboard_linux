@@ -23,6 +23,7 @@
 
 #include <mach/board-zoom.h>
 
+#include "mux.h"
 #include "sdram-micron-mt46h32m32lf-6.h"
 
 static void __init omap_zoom2_init_irq(void)
@@ -40,6 +41,15 @@ static struct twl4030_madc_platform_data zoom2_madc_data = {
 	.irq_line	= 1,
 };
 
+static struct twl4030_codec_audio_data zoom2_audio_data = {
+	.audio_mclk = 26000000,
+};
+
+static struct twl4030_codec_data zoom2_codec_data = {
+	.audio_mclk = 26000000,
+	.audio = &zoom2_audio_data,
+};
+
 static struct twl4030_platform_data zoom2_twldata = {
 	.irq_base	= TWL4030_IRQ_BASE,
 	.irq_end	= TWL4030_IRQ_END,
@@ -50,6 +60,7 @@ static struct twl4030_platform_data zoom2_twldata = {
 	.usb		= &zoom2_usb_data,
 	.gpio		= &zoom2_gpio_data,
 	.keypad		= &zoom2_kp_twl4030_data,
+	.codec		= &zoom2_codec_data,
 	.vmmc1          = &zoom2_vmmc1,
 	.vmmc2          = &zoom2_vmmc2,
 	.vsim           = &zoom2_vsim,
@@ -58,8 +69,17 @@ static struct twl4030_platform_data zoom2_twldata = {
 
 #endif
 
+#ifdef CONFIG_OMAP_MUX
+static struct omap_board_mux board_mux[] __initdata = {
+	{ .reg_offset = OMAP_MUX_TERMINATOR },
+};
+#else
+#define board_mux	NULL
+#endif
+
 static void __init omap_zoom2_init(void)
 {
+	omap3_mux_init(board_mux, OMAP_PACKAGE_CBB);
 	zoom_peripherals_init();
 	zoom_debugboard_init();
 }
@@ -67,7 +87,7 @@ static void __init omap_zoom2_init(void)
 static void __init omap_zoom2_map_io(void)
 {
 	omap2_set_globals_343x();
-	omap2_map_common_io();
+	omap34xx_map_common_io();
 }
 
 MACHINE_START(OMAP_ZOOM2, "OMAP Zoom2 board")

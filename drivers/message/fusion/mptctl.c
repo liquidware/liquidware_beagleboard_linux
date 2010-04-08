@@ -360,8 +360,8 @@ static int mptctl_bus_reset(MPT_ADAPTER *ioc, u8 function)
 	u16		 iocstatus;
 
 	/* bus reset is only good for SCSI IO, RAID PASSTHRU */
-	if (!(function == MPI_FUNCTION_RAID_SCSI_IO_PASSTHROUGH) ||
-	    (function == MPI_FUNCTION_SCSI_IO_REQUEST)) {
+	if (!(function == MPI_FUNCTION_RAID_SCSI_IO_PASSTHROUGH ||
+		function == MPI_FUNCTION_SCSI_IO_REQUEST)) {
 		dtmprintk(ioc, printk(MYIOC_s_WARN_FMT
 			"TaskMgmt, not SCSI_IO!!\n", ioc->name));
 		return -EPERM;
@@ -621,11 +621,8 @@ __mptctl_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	 */
 	iocnumX = khdr.iocnum & 0xFF;
 	if (((iocnum = mpt_verify_adapter(iocnumX, &iocp)) < 0) ||
-	    (iocp == NULL)) {
-		printk(KERN_DEBUG MYNAM "%s::mptctl_ioctl() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnumX);
+	    (iocp == NULL))
 		return -ENODEV;
-	}
 
 	if (!iocp->active) {
 		printk(KERN_DEBUG MYNAM "%s::mptctl_ioctl() @%d - Controller disabled.\n",

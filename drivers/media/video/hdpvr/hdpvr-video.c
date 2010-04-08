@@ -139,7 +139,7 @@ int hdpvr_alloc_buffers(struct hdpvr_device *dev, uint count)
 		urb = usb_alloc_urb(0, GFP_KERNEL);
 		if (!urb) {
 			v4l2_err(&dev->v4l2_dev, "cannot allocate urb\n");
-			goto exit;
+			goto exit_urb;
 		}
 		buf->urb = urb;
 
@@ -148,7 +148,7 @@ int hdpvr_alloc_buffers(struct hdpvr_device *dev, uint count)
 		if (!mem) {
 			v4l2_err(&dev->v4l2_dev,
 				 "cannot allocate usb transfer buffer\n");
-			goto exit;
+			goto exit_urb_buffer;
 		}
 
 		usb_fill_bulk_urb(buf->urb, dev->udev,
@@ -161,6 +161,10 @@ int hdpvr_alloc_buffers(struct hdpvr_device *dev, uint count)
 		list_add_tail(&buf->buff_list, &dev->free_buff_list);
 	}
 	return 0;
+exit_urb_buffer:
+	usb_free_urb(urb);
+exit_urb:
+	kfree(buf);
 exit:
 	hdpvr_free_buffers(dev);
 	return retval;
@@ -298,7 +302,8 @@ static int hdpvr_start_streaming(struct hdpvr_device *dev)
 /* function expects dev->io_mutex to be hold by caller */
 static int hdpvr_stop_streaming(struct hdpvr_device *dev)
 {
-	uint actual_length, c = 0;
+	int actual_length;
+	uint c = 0;
 	u8 *buf;
 
 	if (dev->status == STATUS_IDLE)
@@ -519,7 +524,7 @@ static unsigned int hdpvr_poll(struct file *filp, poll_table *wait)
 
 	mutex_lock(&dev->io_mutex);
 
-	if (video_is_unregistered(dev->video_dev)) {
+	if (!video_is_registered(dev->video_dev)) {
 		mutex_unlock(&dev->io_mutex);
 		return -EIO;
 	}
@@ -568,7 +573,7 @@ static int vidioc_querycap(struct file *file, void  *priv,
 	struct hdpvr_device *dev = video_drvdata(file);
 
 	strcpy(cap->driver, "hdpvr");
-	strcpy(cap->card, "Haupauge HD PVR");
+	strcpy(cap->card, "Hauppauge HD PVR");
 	usb_make_path(dev->udev, cap->bus_info, sizeof(cap->bus_info));
 	cap->version = HDPVR_VERSION;
 	cap->capabilities =     V4L2_CAP_VIDEO_CAPTURE |

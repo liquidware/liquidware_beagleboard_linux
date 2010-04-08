@@ -131,6 +131,7 @@ alloc_pci_controller (int seg)
 }
 
 struct pci_root_info {
+	struct acpi_device *bridge;
 	struct pci_controller *controller;
 	char *name;
 };
@@ -297,9 +298,20 @@ static __devinit acpi_status add_window(struct acpi_resource *res, void *data)
 	window->offset = offset;
 
 	if (insert_resource(root, &window->resource)) {
-		printk(KERN_ERR "alloc 0x%llx-0x%llx from %s for %s failed\n",
-			window->resource.start, window->resource.end,
-			root->name, info->name);
+		dev_err(&info->bridge->dev,
+			"can't allocate host bridge window %pR\n",
+			&window->resource);
+	} else {
+		if (offset)
+			dev_info(&info->bridge->dev, "host bridge window %pR "
+				 "(PCI address [%#llx-%#llx])\n",
+				 &window->resource,
+				 window->resource.start - offset,
+				 window->resource.end - offset);
+		else
+			dev_info(&info->bridge->dev,
+				 "host bridge window %pR\n",
+				 &window->resource);
 	}
 
 	return AE_OK;
@@ -308,9 +320,9 @@ static __devinit acpi_status add_window(struct acpi_resource *res, void *data)
 static void __devinit
 pcibios_setup_root_windows(struct pci_bus *bus, struct pci_controller *ctrl)
 {
-	int i, j;
+	int i;
 
-	j = 0;
+	pci_bus_remove_resources(bus);
 	for (i = 0; i < ctrl->windows; i++) {
 		struct resource *res = &ctrl->window[i].resource;
 		/* HP's firmware has a hack to work around a Windows bug.
@@ -318,12 +330,7 @@ pcibios_setup_root_windows(struct pci_bus *bus, struct pci_controller *ctrl)
 		if ((res->flags & IORESOURCE_MEM) &&
 		    (res->end - res->start < 16))
 			continue;
-		if (j >= PCI_BUS_NUM_RESOURCES) {
-			printk("Ignoring range [%#llx-%#llx] (%lx)\n",
-					res->start, res->end, res->flags);
-			continue;
-		}
-		bus->resource[j++] = res;
+		pci_bus_add_resource(bus, res, 0);
 	}
 }
 
@@ -364,6 +371,7 @@ pci_acpi_scan_root(struct acpi_device *device, int domain, int bus)
 			goto out3;
 
 		sprintf(name, "PCI Bus %04x:%02x", domain, bus);
+		info.bridge = device;
 		info.controller = controller;
 		info.name = name;
 		acpi_walk_resources(device->handle, METHOD_NAME__CRS,
@@ -438,13 +446,12 @@ EXPORT_SYMBOL(pcibios_bus_to_resource);
 static int __devinit is_valid_resource(struct pci_dev *dev, int idx)
 {
 	unsigned int i, type_mask = IORESOURCE_IO | IORESOURCE_MEM;
-	struct resource *devr = &dev->resource[idx];
+	struct resource *devr = &dev->resource[idx], *busr;
 
 	if (!dev->bus)
 		return 0;
-	for (i=0; i<PCI_BUS_NUM_RESOURCES; i++) {
-		struct resource *busr = dev->bus->resource[i];
 
+	pci_bus_for_each_resource(dev->bus, busr, i) {
 		if (!busr || ((busr->flags ^ devr->flags) & type_mask))
 			continue;
 		if ((devr->start) && (devr->start >= busr->start) &&
@@ -533,10 +540,11 @@ pcibios_disable_device (struct pci_dev *dev)
 		acpi_pci_irq_disable(dev);
 }
 
-void
-pcibios_align_resource (void *data, struct resource *res,
+resource_size_t
+pcibios_align_resource (void *data, const struct resource *res,
 		        resource_size_t size, resource_size_t align)
 {
+	return res->start;
 }
 
 /*
@@ -720,9 +728,6 @@ int ia64_pci_legacy_write(struct pci_bus *bus, u16 port, u32 val, u8 size)
 	return ret;
 }
 
-/* It's defined in drivers/pci/pci.c */
-extern u8 pci_cache_line_size;
-
 /**
  * set_pci_cacheline_size - determine cacheline size for PCI devices
  *
@@ -731,7 +736,7 @@ extern u8 pci_cache_line_size;
  *
  * Code mostly taken from arch/ia64/kernel/palinfo.c:cache_info().
  */
-static void __init set_pci_cacheline_size(void)
+static void __init set_pci_dfl_cacheline_size(void)
 {
 	unsigned long levels, unique_caches;
 	long status;
@@ -751,7 +756,7 @@ static void __init set_pci_cacheline_size(void)
 			"(status=%ld)\n", __func__, status);
 		return;
 	}
-	pci_cache_line_size = (1 << cci.pcci_line_size) / 4;
+	pci_dfl_cache_line_size = (1 << cci.pcci_line_size) / 4;
 }
 
 u64 ia64_dma_get_required_mask(struct device *dev)
@@ -782,7 +787,7 @@ EXPORT_SYMBOL_GPL(dma_get_required_mask);
 
 static int __init pcibios_init(void)
 {
-	set_pci_cacheline_size();
+	set_pci_dfl_cacheline_size();
 	return 0;
 }
 

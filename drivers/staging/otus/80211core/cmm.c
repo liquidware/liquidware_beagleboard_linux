@@ -346,8 +346,6 @@ u16_t zfFindSuperGElement(zdev_t* dev, zbuf_t* buf, u8_t type)
     u8_t super_feature;
     u8_t ouiSuperG[6] = {0x00,0x03,0x7f,0x01, 0x01, 0x00};
 
-    zmw_get_wlan_dev(dev);
-
     /* Get offset of first element */
     subType = (zmw_rx_buf_readb(dev, buf, 0) >> 4);
     if ((offset = zgElementOffsetTable[subType]) == 0xff)
@@ -410,8 +408,6 @@ u16_t zfFindXRElement(zdev_t* dev, zbuf_t* buf, u8_t type)
     u16_t elen;
     u8_t id;
     u8_t ouixr[6] = {0x00,0x03,0x7f,0x03, 0x01, 0x00};
-
-    zmw_get_wlan_dev(dev);
 
     /* Get offset of first element */
     subType = (zmw_rx_buf_readb(dev, buf, 0) >> 4);
@@ -1428,7 +1424,7 @@ void zfProcessManagement(zdev_t* dev, zbuf_t* buf, struct zsAdditionInfo* AddInf
         {
                 /* Beacon */
             case ZM_WLAN_FRAME_TYPE_BEACON :
-                /* if enable 802.11h and current chanel is silent but receive beacon from other AP */
+                /* if enable 802.11h and current channel is silent but receive beacon from other AP */
                 if (((wd->regulationTable.allowChannel[wd->regulationTable.CurChIndex].channelFlags
                         & ZM_REG_FLAG_CHANNEL_CSA) != 0) && wd->sta.DFSEnable)
                 {
@@ -1469,7 +1465,7 @@ void zfProcessManagement(zdev_t* dev, zbuf_t* buf, struct zsAdditionInfo* AddInf
                 break;
                 /* Probe response */
             case ZM_WLAN_FRAME_TYPE_PROBERSP :
-                /* if enable 802.11h and current chanel is silent but receive probe response from other AP */
+                /* if enable 802.11h and current channel is silent but receive probe response from other AP */
                 if (((wd->regulationTable.allowChannel[wd->regulationTable.CurChIndex].channelFlags
                         & ZM_REG_FLAG_CHANNEL_CSA) != 0) && wd->sta.DFSEnable)
                 {

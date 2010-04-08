@@ -198,7 +198,7 @@ struct wusb_port {
  *                 ports) this HC will take. Read-only.
  *
  * @port      	   Array of port status for each fake root port. Guaranteed to
- *                 always be the same lenght during device existence
+ *                 always be the same length during device existence
  *                 [this allows for some unlocked but referenced reading].
  *
  * @mmcies_max	   Max number of Information Elements this HC can send
@@ -253,6 +253,7 @@ struct wusbhc {
 
 	unsigned trust_timeout;			/* in jiffies */
 	struct wusb_ckhdid chid;
+	uint8_t phy_rate;
 	struct wuie_host_info *wuie_host_info;
 
 	struct mutex mutex;			/* locks everything else */

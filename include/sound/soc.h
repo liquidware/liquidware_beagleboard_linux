@@ -169,6 +169,23 @@
 	.private_value = (unsigned long)&xenum }
 
 /*
+ * Simplified versions of above macros, declaring a struct and calculating
+ * ARRAY_SIZE internally
+ */
+#define SOC_ENUM_DOUBLE_DECL(name, xreg, xshift_l, xshift_r, xtexts) \
+	struct soc_enum name = SOC_ENUM_DOUBLE(xreg, xshift_l, xshift_r, \
+						ARRAY_SIZE(xtexts), xtexts)
+#define SOC_ENUM_SINGLE_DECL(name, xreg, xshift, xtexts) \
+	SOC_ENUM_DOUBLE_DECL(name, xreg, xshift, xshift, xtexts)
+#define SOC_ENUM_SINGLE_EXT_DECL(name, xtexts) \
+	struct soc_enum name = SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(xtexts), xtexts)
+#define SOC_VALUE_ENUM_DOUBLE_DECL(name, xreg, xshift_l, xshift_r, xmask, xtexts, xvalues) \
+	struct soc_enum name = SOC_VALUE_ENUM_DOUBLE(xreg, xshift_l, xshift_r, xmask, \
+							ARRAY_SIZE(xtexts), xtexts, xvalues)
+#define SOC_VALUE_ENUM_SINGLE_DECL(name, xreg, xshift, xmask, xtexts, xvalues) \
+	SOC_VALUE_ENUM_DOUBLE_DECL(name, xreg, xshift, xshift, xmask, xtexts, xvalues)
+
+/*
  * Bias levels
  *
  * @ON:      Bias is fully on for audio playback and capture operations.
@@ -223,15 +240,15 @@ int snd_soc_codec_set_cache_io(struct snd_soc_codec *codec,
 			       int addr_bits, int data_bits,
 			       enum snd_soc_control_type control);
 
-#ifdef CONFIG_PM
-int snd_soc_suspend_device(struct device *dev);
-int snd_soc_resume_device(struct device *dev);
-#endif
-
 /* pcm <-> DAI connect */
 void snd_soc_free_pcms(struct snd_soc_device *socdev);
 int snd_soc_new_pcms(struct snd_soc_device *socdev, int idx, const char *xid);
-int snd_soc_init_card(struct snd_soc_device *socdev);
+
+/* Utility functions to get clock rates from various things */
+int snd_soc_calc_frame_size(int sample_size, int channels, int tdm_slots);
+int snd_soc_params_to_frame_size(struct snd_pcm_hw_params *params);
+int snd_soc_calc_bclk(int fs, int sample_size, int channels, int tdm_slots);
+int snd_soc_params_to_bclk(struct snd_pcm_hw_params *parms);
 
 /* set runtime hw params */
 int snd_soc_set_runtime_hwparams(struct snd_pcm_substream *substream,
@@ -253,6 +270,9 @@ void snd_soc_jack_free_gpios(struct snd_soc_jack *jack, int count,
 /* codec register bit access */
 int snd_soc_update_bits(struct snd_soc_codec *codec, unsigned short reg,
 				unsigned int mask, unsigned int value);
+int snd_soc_update_bits_locked(struct snd_soc_codec *codec,
+			       unsigned short reg, unsigned int mask,
+			       unsigned int value);
 int snd_soc_test_bits(struct snd_soc_codec *codec, unsigned short reg,
 				unsigned int mask, unsigned int value);
 
@@ -333,6 +353,8 @@ struct snd_soc_jack_gpio {
 	int debounce_time;
 	struct snd_soc_jack *jack;
 	struct work_struct work;
+
+	int (*jack_status_check)(void);
 };
 #endif
 
@@ -400,6 +422,10 @@ struct snd_soc_codec {
 	short reg_cache_size;
 	short reg_cache_step;
 
+	unsigned int idle_bias_off:1; /* Use BIAS_OFF instead of STANDBY */
+	unsigned int cache_only:1;  /* Suppress writes to hardware */
+	unsigned int cache_sync:1; /* Cache needs to be synced to hardware */
+
 	/* dapm */
 	u32 pop_time;
 	struct list_head dapm_widgets;
@@ -413,6 +439,7 @@ struct snd_soc_codec {
 	unsigned int num_dai;
 
 #ifdef CONFIG_DEBUG_FS
+	struct dentry *debugfs_codec_root;
 	struct dentry *debugfs_reg;
 	struct dentry *debugfs_pop_time;
 	struct dentry *debugfs_dapm;
@@ -493,6 +520,8 @@ struct snd_soc_card {
 	/* callbacks */
 	int (*set_bias_level)(struct snd_soc_card *,
 			      enum snd_soc_bias_level level);
+
+	long pmdown_time;
 
 	/* CPU <--> Codec DAI links  */
 	struct snd_soc_dai_link *dai_link;
