@@ -91,9 +91,7 @@ static struct omap_dss_driver generic_driver = {
 
 static int __init generic_panel_drv_init(void)
 {
-    printk(KERN_INFO "generic_panel: init panel\n");
 	return omap_dss_register_driver(&generic_driver);
-    printk(KERN_INFO "generic_panel: init done\n");
 }
 
 static void __exit generic_panel_drv_exit(void)

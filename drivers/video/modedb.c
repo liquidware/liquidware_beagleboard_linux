@@ -36,6 +36,10 @@ EXPORT_SYMBOL_GPL(fb_mode_option);
 
 static const struct fb_videomode modedb[] = {
     {
+	/* 480x272 @ 60 Hz, 12.5 kHz hsync */
+	NULL, 60, 480, 272, 12500, 60, 102, 30, 20, 164, 2,
+	0, FB_VMODE_NONINTERLACED
+    }, {
 	/* 640x400 @ 70 Hz, 31.5 kHz hsync */
 	NULL, 70, 640, 400, 39721, 40, 24, 39, 9, 96, 2,
 	0, FB_VMODE_NONINTERLACED
@@ -100,6 +104,10 @@ static const struct fb_videomode modedb[] = {
 	NULL, 70, 1024, 768, 13333, 144, 24, 29, 3, 136, 6,
 	0, FB_VMODE_NONINTERLACED
     }, {
+	/* 1280x720 @ 60 Hz, 45 kHz hsync, CEA 681-E Format 4 */
+	"hd720", 60, 1280, 720, 13468, 220, 110, 20, 5, 40, 5,
+	0, FB_VMODE_NONINTERLACED
+    }, {
 	/* 1280x1024 @ 87 Hz interlaced, 51 kHz hsync */
 	NULL, 87, 1280, 1024, 12500, 56, 16, 128, 1, 216, 12,
 	0, FB_VMODE_INTERLACED
@@ -122,7 +130,7 @@ static const struct fb_videomode modedb[] = {
     }, {
 	/* 1400x1050 @ 60Hz, 63.9 kHz hsync */
 	NULL, 60, 1400, 1050, 9259, 136, 40, 13, 1, 112, 3,
-	0, FB_VMODE_NONINTERLACED   	
+	0, FB_VMODE_NONINTERLACED
     }, {
 	/* 1400x1050 @ 75,107 Hz, 82,392 kHz +hsync +vsync*/
 	NULL, 75, 1400, 1050, 7190, 120, 56, 23, 10, 112, 13,
@@ -287,10 +295,10 @@ const struct fb_videomode vesa_modes[] = {
 	{ NULL, 85, 721, 400, 28169, 108, 36, 42, 01, 72, 3,
 	  FB_SYNC_VERT_HIGH_ACT, FB_VMODE_NONINTERLACED, FB_MODE_IS_VESA },
 	/* 3 640x480-60 VESA */
-	{ NULL, 60, 640, 480, 39682,  48, 16, 33, 10, 96, 2, 
+	{ NULL, 60, 640, 480, 39682,  48, 16, 33, 10, 96, 2,
 	  0, FB_VMODE_NONINTERLACED, FB_MODE_IS_VESA },
 	/* 4 640x480-72 VESA */
-	{ NULL, 72, 640, 480, 31746, 128, 24, 29, 9, 40, 2, 
+	{ NULL, 72, 640, 480, 31746, 128, 24, 29, 9, 40, 2,
 	  0, FB_VMODE_NONINTERLACED, FB_MODE_IS_VESA },
 	/* 5 640x480-75 VESA */
 	{ NULL, 75, 640, 480, 31746, 120, 16, 16, 01, 64, 3,
@@ -373,7 +381,7 @@ const struct fb_videomode vesa_modes[] = {
 	  FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 	  FB_VMODE_NONINTERLACED, FB_MODE_IS_VESA },
 	/* 26 1600x1200-75 VESA */
-	{ NULL, 75, 1600, 1200, 4938, 304, 64, 46, 1, 192, 3, 
+	{ NULL, 75, 1600, 1200, 4938, 304, 64, 46, 1, 192, 3,
 	  FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
 	  FB_VMODE_NONINTERLACED, FB_MODE_IS_VESA },
 	/* 27 1600x1200-85 VESA */

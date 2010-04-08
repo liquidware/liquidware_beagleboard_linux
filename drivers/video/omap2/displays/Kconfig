@@ -7,6 +7,18 @@ config PANEL_GENERIC
 	  Generic panel driver.
 	  Used for DVI output for Beagle and OMAP3 SDP.
 
+config PANEL_LGPHILIPS_LB035Q02
+	tristate "LG.Philips LB035Q02 LCD Panel"
+	depends on OMAP2_DSS
+	help
+	  LCD Panel used on Overo Palo35
+
+config PANEL_CMEL_OLED43
+	tristate "CMEL OLED43 LCD Panel"
+	depends on OMAP2_DSS
+	help
+	  OLED Panel used on BeagleSlide
+
 config PANEL_SAMSUNG_LTE430WQ_F0C
         tristate "Samsung LTE430WQ-F0C LCD Panel"
         depends on OMAP2_DSS
@@ -24,5 +36,11 @@ config PANEL_TAAL
         depends on OMAP2_DSS_DSI
         help
           Taal DSI command mode panel from TPO.
+
+config PANEL_TOPPOLY_TDO35S
+        tristate "Toppoly TDO35S LCD Panel support"
+        depends on OMAP2_DSS
+        help
+          LCD Panel used in CM-T35
 
 endmenu

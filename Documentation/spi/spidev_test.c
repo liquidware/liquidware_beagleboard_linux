@@ -142,10 +142,10 @@ static void parse_opts(int argc, char *argv[])
 			mode |= SPI_3WIRE;
 			break;
 		case 'N':
-			mode |= SPI_NO_CS;
+//			mode |= SPI_NO_CS;
 			break;
 		case 'R':
-			mode |= SPI_READY;
+//			mode |= SPI_READY;
 			break;
 		default:
 			print_usage(argv[0]);

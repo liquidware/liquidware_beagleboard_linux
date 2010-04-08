@@ -138,6 +138,8 @@ static void *__videobuf_alloc(size_t size)
 	struct videobuf_buffer *vb;
 
 	vb = kzalloc(size+sizeof(*mem),GFP_KERNEL);
+	if (!vb)
+		return vb;
 
 	mem = vb->priv = ((char *)vb)+size;
 	mem->magic=MAGIC_VMAL_MEM;
@@ -391,8 +393,8 @@ static struct videobuf_qtype_ops qops = {
 };
 
 void videobuf_queue_vmalloc_init(struct videobuf_queue* q,
-			 struct videobuf_queue_ops *ops,
-			 void *dev,
+			 const struct videobuf_queue_ops *ops,
+			 struct device *dev,
 			 spinlock_t *irqlock,
 			 enum v4l2_buf_type type,
 			 enum v4l2_field field,
