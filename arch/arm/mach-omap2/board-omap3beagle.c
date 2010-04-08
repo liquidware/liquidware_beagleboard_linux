@@ -152,34 +152,10 @@ static struct platform_device omap3beagle_nand_device = {
 
 /* DSS */
 
-#if 0
-static struct omap_video_timings cmel43_timings = {
-	.x_res = 480,
-	.y_res = 272,
-
-	.pixel_clock	= 12500,
-
-	.hsw		= 2,
-	.hfp		= 60,
-	.hbp		= 102,
-
-	.vsw		= 2,
-	.vfp		= 30,
-	.vbp		= 20,
-};
-#endif
-
 static int beagle_enable_dvi(struct omap_dss_device *dssdev)
 {
 	if (dssdev->reset_gpio != -1)
 		gpio_set_value(dssdev->reset_gpio, 1);
-
-//        dssdev->panel.config = OMAP_DSS_LCD_TFT | OMAP_DSS_LCD_IVS |
-//                OMAP_DSS_LCD_IHS;
-//	dssdev->panel.timings = cmel43_timings; //oled hacking
-
-	//i2C hacking
-	printk(KERN_INFO "beagle_enable_dvi: i2c hacking\n");
 
 	return 0;
 }
@@ -189,16 +165,6 @@ static void beagle_disable_dvi(struct omap_dss_device *dssdev)
 	if (dssdev->reset_gpio != -1)
 		gpio_set_value(dssdev->reset_gpio, 0);
 }
-
-static struct omap_dss_device beagle_lcd_device = {
-	.type = OMAP_DISPLAY_TYPE_DPI,
-	.name = "lcd",
-	.driver_name = "cmel_oled43_panel",
-	.phy.dpi.data_lines = 24,
-	.reset_gpio = 170,
-	.platform_enable = beagle_enable_dvi,
-	.platform_disable = beagle_disable_dvi,
-};
 
 static struct omap_dss_device beagle_dvi_device = {
 	.type = OMAP_DISPLAY_TYPE_DPI,
@@ -242,17 +208,14 @@ static struct omap_dss_device beagle_tv_device = {
 };
 
 static struct omap_dss_device *beagle_dss_devices[] = {
-	&beagle_lcd_device,
 	&beagle_dvi_device,
 	&beagle_tv_device,
-//	&beagle_lcd_device,
 };
 
 static struct omap_dss_board_info beagle_dss_data = {
 	.num_devices = ARRAY_SIZE(beagle_dss_devices),
 	.devices = beagle_dss_devices,
-//	.default_device = &beagle_dvi_device,
-	.default_device = &beagle_lcd_device,
+	.default_device = &beagle_dvi_device,
 };
 
 static struct platform_device beagle_dss_device = {
@@ -472,11 +435,7 @@ static struct i2c_board_info __initdata beagle_i2c2_boardinfo[] = {
 static struct i2c_board_info __initdata beagle_i2c2_boardinfo[] = {};
 #endif
 
-static struct i2c_board_info __initdata beagle_i2c3_boardinfo[] = {
-	{
-		I2C_BOARD_INFO("cmel_oled43", 0x69),
-	},
-};
+static struct i2c_board_info __initdata beagle_i2c3_boardinfo[] = {};
 
 static int __init omap3_beagle_i2c_init(void)
 {
@@ -561,15 +520,6 @@ static struct platform_device *omap3_beagle_devices[] __initdata = {
 	&beagle_dss_device,
 };
 
-static struct spi_board_info beagle_spi_board_info3[] = {
-	{
-		.modalias	= "spidev",
-		.max_speed_hz	= 20000000, //20 Mbps
-		.bus_num	= 3,
-		.chip_select	= 0,
-	},
-};
-
 static void __init omap3beagle_flash_init(void)
 {
 	u8 cs = 0;
@@ -626,46 +576,6 @@ static void __init omap3_beagle_init(void)
 	platform_add_devices(omap3_beagle_devices,
 			ARRAY_SIZE(omap3_beagle_devices));
 	omap_serial_init();
-
-#if 0
-	printk(KERN_ERR "Debug ================> MCSPI >>> start\n");
-
-	omap_cfg_reg(XXX_3430_MCSPI3_CLK_OUT);
-	omap_cfg_reg(XXX_3430_MCSPI3_SIMO_OUT);
-	omap_cfg_reg(XXX_3430_MCSPI3_SOMI);
-	omap_cfg_reg(XXX_3430_MCSPI3_CS0_OUT);
-	omap_cfg_reg(XXX_3430_MCSPI3_CS1_OUT);
-
-	//avoid other pins/balls with McSPI function
-	omap_cfg_reg(XXX_3430_gpio_88);
-	omap_cfg_reg(XXX_3430_gpio_89);
-	omap_cfg_reg(XXX_3430_gpio_90);
-	omap_cfg_reg(XXX_3430_gpio_91);
-	omap_cfg_reg(XXX_3430_gpio_92);
-
-	omap_cfg_reg(XXX_3430_gpio_14);
-	omap_cfg_reg(XXX_3430_gpio_15);
-	omap_cfg_reg(XXX_3430_gpio_16);
-	omap_cfg_reg(XXX_3430_gpio_17);
-	omap_cfg_reg(XXX_3430_gpio_21);
-	printk(KERN_INFO "Debug ================> MCSPI >>> end\n");
-
-
-	printk(KERN_INFO "Debug ================> register SLAVE DEVICES using [spidev] protocol driver >>> start\n");
-	spi_register_board_info(beagle_spi_board_info3, ARRAY_SIZE(beagle_spi_board_info3));
-	printk(KERN_INFO "Debug ================> register SLAVE DEVICES using [spidev] protocol driver >>> end\n");
-	omap_cfg_reg(XXX_3430_gpio_157); //add by yuchih
-#endif
-	omap_cfg_reg(AH3_34XX_GPIO137_OUT);     //NRESET
-	omap_cfg_reg(AF3_34XX_GPIO138_OUT);	//soft CLK
-	omap_cfg_reg(AE3_34XX_GPIO139_OUT);	//soft CS
-	omap_cfg_reg(AE5_34XX_GPIO143_OUT);	//Panel_Pwr
-	omap_cfg_reg(AB26_34XX_GPIO144_OUT);	//soft MOSI
-	omap_cfg_reg(AA25_34XX_GPIO146_UP);     //soft MISO
-
-gpio_request(143, "Panel_Pwr");
-gpio_direction_output(143, false);
-gpio_free(143);
 
 	omap_cfg_reg(J25_34XX_GPIO170);
 

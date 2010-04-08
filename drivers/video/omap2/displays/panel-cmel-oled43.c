@@ -19,6 +19,7 @@
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/gpio.h>
+#include <plat/mux.h>
 
 #include <plat/display.h>
 
@@ -73,21 +74,6 @@ static int oled43_panel_probe(struct omap_dss_device *dssdev)
 static void oled43_panel_remove(struct omap_dss_device *dssdev)
 {
 	//turn power supply off?
-}
-
-////////////////////////////////////////////////////////
-// Wrapper to request a GPIO pin
-static int digitalRequest(u16 pin) {
-	int ret;
-	char label[64];
-	sprintf(label, "%s: GPIO_PIN_%d", "cmel_oled43_panel", pin);
-
-	ret = gpio_request(pin, label);
-	if (ret < 0) {
-		pr_err("%s: Unable to get GPIO_PIN_%d, ret=%d\n", "cmel_oled43_panel", pin, ret);
-	}
-
-	return ret;
 }
 
 ////////////////////////////////////////////////////////
@@ -248,17 +234,24 @@ static int __init oled43_panel_drv_init(void)
 
 	printk(KERN_INFO "cmel_oled43_panel: init panel\n");
 
+    //configure the gpio
+	omap_cfg_reg(AH3_34XX_GPIO137_OUT);     //NRESET
+	omap_cfg_reg(AF3_34XX_GPIO138_OUT);		//soft CLK
+	omap_cfg_reg(AE3_34XX_GPIO139_OUT);		//soft CS
+	omap_cfg_reg(AE5_34XX_GPIO143_OUT);		//Panel_Pwr
+	omap_cfg_reg(AB26_34XX_GPIO144_OUT);	//soft MOSI
+	omap_cfg_reg(AA25_34XX_GPIO146_UP);     //soft MISO
+
+	gpio_request(143, "Panel_Pwr");
+	gpio_direction_output(143, false);
+	gpio_free(143);
+
 	//Get the GPIO pins used for the panel
 	gpio_request(CS_PIN, "OLED43_CS_PIN");
 	gpio_request(MOSI_PIN, "OLED43_MOSI_PIN");
 	gpio_request(CLK_PIN, "OLED43_CLK_PIN");
 	gpio_request(RESET_PIN, "OLED43_RESET_PIN");
 	gpio_request(PANEL_PWR_PIN, "OLED43_PANEL_PWR_PIN");
-	//digitalRequest(CS_PIN);
-	//digitalRequest(MOSI_PIN);
-	//digitalRequest(CLK_PIN);
-	//digitalRequest(RESET_PIN);
-	//digitalRequest(PANEL_PWR_PIN);
 
 	PANEL_PWR_LOW;						// hold the oled power supply off
 
