@@ -43,6 +43,8 @@
 #include <plat/nand.h>
 #include <plat/usb.h>
 #include <plat/timer-gp.h>
+#include <plat/display.h>
+
 
 #include "mux.h"
 #include "hsmmc.h"
@@ -108,6 +110,32 @@ static struct platform_device omap3beagle_nand_device = {
 
 #include "sdram-micron-mt46h32m32lf-6.h"
 
+static struct omap_dss_device beagle_lcd_device = {
+	.name			= "lcd",
+	.driver_name		= "cmel_oled43_panel",
+	.type			= OMAP_DISPLAY_TYPE_DPI,
+	.phy.dpi.data_lines	= 24,
+	.reset_gpio		= 157,
+};
+
+static struct omap_dss_device *beagle_dss_devices[] = {
+	&beagle_lcd_device,
+};
+
+static struct omap_dss_board_info beagle_dss_data = {
+	.num_devices	= ARRAY_SIZE(beagle_dss_devices),
+	.devices	= beagle_dss_devices,
+	.default_device	= &beagle_lcd_device,
+};
+
+static struct platform_device beagle_dss_device = {
+	.name		= "omapdss",
+	.id		= -1,
+	.dev		= {
+		.platform_data = &beagle_dss_data,
+	},
+};
+
 static struct omap2_hsmmc_info mmc[] = {
 	{
 		.mmc		= 1,
@@ -115,11 +143,6 @@ static struct omap2_hsmmc_info mmc[] = {
 		.gpio_wp	= 29,
 	},
 	{}	/* Terminator */
-};
-
-static struct platform_device omap3_beagle_lcd_device = {
-	.name		= "omap3beagle_lcd",
-	.id		= -1,
 };
 
 static struct omap_lcd_config omap3_beagle_lcd_config __initdata = {
@@ -132,6 +155,14 @@ static struct regulator_consumer_supply beagle_vmmc1_supply = {
 
 static struct regulator_consumer_supply beagle_vsim_supply = {
 	.supply			= "vmmc_aux",
+};
+
+static struct regulator_consumer_supply beagle_vdda_dac_supply =
+	REGULATOR_SUPPLY("vdda_dac", "omapdss");
+
+static struct regulator_consumer_supply beagle_vdds_supplies[] = {
+	REGULATOR_SUPPLY("vdds_sdi", "omapdss"),
+	REGULATOR_SUPPLY("vdds_dsi", "omapdss"),
 };
 
 static struct gpio_led gpio_leds[];
@@ -181,16 +212,6 @@ static struct twl4030_gpio_platform_data beagle_gpio_data = {
 	.setup		= beagle_twl_gpio_setup,
 };
 
-static struct regulator_consumer_supply beagle_vdac_supply = {
-	.supply		= "vdac",
-	.dev		= &omap3_beagle_lcd_device.dev,
-};
-
-static struct regulator_consumer_supply beagle_vdvi_supply = {
-	.supply		= "vdvi",
-	.dev		= &omap3_beagle_lcd_device.dev,
-};
-
 /* VMMC1 for MMC1 pins CMD, CLK, DAT0..DAT3 (20 mA, plus card == max 220 mA) */
 static struct regulator_init_data beagle_vmmc1 = {
 	.constraints = {
@@ -232,7 +253,7 @@ static struct regulator_init_data beagle_vdac = {
 					| REGULATOR_CHANGE_STATUS,
 	},
 	.num_consumer_supplies	= 1,
-	.consumer_supplies	= &beagle_vdac_supply,
+	.consumer_supplies	= &beagle_vdda_dac_supply,
 };
 
 /* VPLL2 for digital video outputs */
@@ -246,8 +267,8 @@ static struct regulator_init_data beagle_vpll2 = {
 		.valid_ops_mask		= REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 	},
-	.num_consumer_supplies	= 1,
-	.consumer_supplies	= &beagle_vdvi_supply,
+	.num_consumer_supplies	=  ARRAY_SIZE(beagle_vdds_supplies),
+	.consumer_supplies	= beagle_vdds_supplies,
 };
 
 static struct twl4030_usb_data beagle_usb_data = {
@@ -367,9 +388,9 @@ static void __init omap3_beagle_init_irq(void)
 }
 
 static struct platform_device *omap3_beagle_devices[] __initdata = {
-	&omap3_beagle_lcd_device,
 	&leds_gpio,
 	&keys_gpio,
+	&beagle_dss_device,
 };
 
 static void __init omap3beagle_flash_init(void)
@@ -443,6 +464,13 @@ static void __init omap3_beagle_init(void)
 	platform_add_devices(omap3_beagle_devices,
 			ARRAY_SIZE(omap3_beagle_devices));
 	omap_serial_init();
+
+	//For the CMEL OLED Panel
+    omap_mux_init_gpio(139, OMAP_PIN_OUTPUT);   //CS_PIN
+    omap_mux_init_gpio(144, OMAP_PIN_OUTPUT);	//MOSI_PIN
+    omap_mux_init_gpio(138, OMAP_PIN_OUTPUT);	//CLK_PIN
+    omap_mux_init_gpio(137, OMAP_PIN_OUTPUT);	//RESET_PIN
+    omap_mux_init_gpio(143, OMAP_PIN_OUTPUT);	//PANEL_PWR_PIN
 
 	omap_mux_init_gpio(170, OMAP_PIN_INPUT);
 	gpio_request(170, "DVI_nPD");

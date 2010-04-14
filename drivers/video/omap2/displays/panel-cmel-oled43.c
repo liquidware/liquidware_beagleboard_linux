@@ -19,7 +19,6 @@
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/gpio.h>
-#include <plat/mux.h>
 
 #include <plat/display.h>
 
@@ -62,20 +61,6 @@ static struct omap_video_timings oled43_timings = {
 //       vbp must be = 20
 };
 
-static int oled43_panel_probe(struct omap_dss_device *dssdev)
-{
-	dssdev->panel.config = OMAP_DSS_LCD_TFT | OMAP_DSS_LCD_IVS |
-		OMAP_DSS_LCD_IHS;
-	dssdev->panel.timings = oled43_timings;
-
-	return 0;
-}
-
-static void oled43_panel_remove(struct omap_dss_device *dssdev)
-{
-	//turn power supply off?
-}
-
 ////////////////////////////////////////////////////////
 // Initialize the software SPI interface
 static void oled43_spi_init(void) {
@@ -116,19 +101,9 @@ static void oled43_writeReg(uint8_t index, uint8_t val) {
     CS_HIGH;
 }
 
-static int oled43_panel_enable(struct omap_dss_device *dssdev)
-{
-	int r = 0;
-
-	pr_info("cmel_oled43_panel: panel_enable begin\n");
-	/* wait couple of vsyncs until enabling the LCD */
-	msleep(50);
-
-	if (dssdev->platform_enable)
-		r = dssdev->platform_enable(dssdev);
+static int oled43_hardware_init(void) {
 
 	/* Panel init sequence from the cmel panel datasheet */
-
 	PANEL_PWR_LOW;						// just to be sure, hold the oled power supply off
 	RESET_LOW;							// panel in reset
 	oled43_spi_init();					// init spi interface
@@ -184,33 +159,112 @@ static int oled43_panel_enable(struct omap_dss_device *dssdev)
 
 	PANEL_PWR_HIGH;
 
+	return 0;
+}
+
+static int oled43_panel_power_on(struct omap_dss_device *dssdev)
+{
+	int r;
+
+	oled43_hardware_init();
+
+	r = omapdss_dpi_display_enable(dssdev);
+	if (r)
+		goto err0;
+
+	if (dssdev->platform_enable) {
+		r = dssdev->platform_enable(dssdev);
+		if (r)
+			goto err1;
+	}
+
+	return 0;
+err1:
+	omapdss_dpi_display_disable(dssdev);
+err0:
+	return r;
+}
+
+static void oled43_panel_power_off(struct omap_dss_device *dssdev)
+{
+	PANEL_PWR_LOW; //simply turn off the power supply
+
+	if (dssdev->platform_disable)
+		dssdev->platform_disable(dssdev);
+
+	omapdss_dpi_display_disable(dssdev);
+}
+
+static int oled43_panel_probe(struct omap_dss_device *dssdev)
+{
+	dssdev->panel.config = OMAP_DSS_LCD_TFT; // | OMAP_DSS_LCD_IVS | OMAP_DSS_LCD_IHS;
+	dssdev->panel.timings = oled43_timings;
+
+	return 0;
+}
+
+static void oled43_panel_remove(struct omap_dss_device *dssdev)
+{
+}
+
+static int oled43_panel_enable(struct omap_dss_device *dssdev)
+{
+	int r = 0;
+	pr_info("cmel_oled43_panel: panel_enable begin\n");
+	r = oled43_panel_power_on(dssdev);
+	if (r)
+		return r;
+
+	dssdev->state = OMAP_DSS_DISPLAY_ACTIVE;
 	pr_info("cmel_oled43_panel: panel_enable end\n");
 
-	return r;
+	return 0;
 }
 
 static void oled43_panel_disable(struct omap_dss_device *dssdev)
 {
-	if (dssdev->platform_disable)
-		dssdev->platform_disable(dssdev);
+	oled43_panel_power_off(dssdev);
 
-	PANEL_PWR_LOW;
-
-	/* wait at least 5 vsyncs after disabling the LCD */
-	msleep(100);
+	dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
 }
 
 static int oled43_panel_suspend(struct omap_dss_device *dssdev)
 {
+	oled43_panel_power_off(dssdev);
+	dssdev->state = OMAP_DSS_DISPLAY_SUSPENDED;
 	pr_info("cmel_oled43_panel: panel_suspend\n");
-	oled43_panel_disable(dssdev);
 	return 0;
 }
 
 static int oled43_panel_resume(struct omap_dss_device *dssdev)
 {
+	int r = 0;
 	pr_info("cmel_oled43_panel: panel_resume\n");
-	return oled43_panel_enable(dssdev);
+	r = oled43_panel_power_on(dssdev);
+	if (r)
+		return r;
+
+	dssdev->state = OMAP_DSS_DISPLAY_ACTIVE;
+
+	return 0;
+}
+
+static void oled43_panel_set_timings(struct omap_dss_device *dssdev,
+		struct omap_video_timings *timings)
+{
+	dpi_set_timings(dssdev, timings);
+}
+
+static void oled43_panel_get_timings(struct omap_dss_device *dssdev,
+		struct omap_video_timings *timings)
+{
+	*timings = dssdev->panel.timings;
+}
+
+static int oled43_panel_check_timings(struct omap_dss_device *dssdev,
+		struct omap_video_timings *timings)
+{
+	return dpi_check_timings(dssdev, timings);
 }
 
 static struct omap_dss_driver oled43_driver = {
@@ -221,6 +275,10 @@ static struct omap_dss_driver oled43_driver = {
 	.disable	= oled43_panel_disable,
 	.suspend	= oled43_panel_suspend,
 	.resume		= oled43_panel_resume,
+
+	.set_timings	= oled43_panel_set_timings,
+	.get_timings	= oled43_panel_get_timings,
+	.check_timings	= oled43_panel_check_timings,
 
 	.driver         = {
 		.name   = "cmel_oled43_panel",
@@ -235,16 +293,12 @@ static int __init oled43_panel_drv_init(void)
 	printk(KERN_INFO "cmel_oled43_panel: init panel\n");
 
     //configure the gpio
-	omap_cfg_reg(AH3_34XX_GPIO137_OUT);     //NRESET
-	omap_cfg_reg(AF3_34XX_GPIO138_OUT);		//soft CLK
-	omap_cfg_reg(AE3_34XX_GPIO139_OUT);		//soft CS
-	omap_cfg_reg(AE5_34XX_GPIO143_OUT);		//Panel_Pwr
-	omap_cfg_reg(AB26_34XX_GPIO144_OUT);	//soft MOSI
-	omap_cfg_reg(AA25_34XX_GPIO146_UP);     //soft MISO
-
-	gpio_request(143, "Panel_Pwr");
-	gpio_direction_output(143, false);
-	gpio_free(143);
+//	omap_cfg_reg(AH3_34XX_GPIO137_OUT);     //NRESET
+//	omap_cfg_reg(AF3_34XX_GPIO138_OUT);		//soft CLK
+//	omap_cfg_reg(AE3_34XX_GPIO139_OUT);		//soft CS
+//	omap_cfg_reg(AE5_34XX_GPIO143_OUT);		//Panel_Pwr
+//	omap_cfg_reg(AB26_34XX_GPIO144_OUT);	//soft MOSI
+//	omap_cfg_reg(AA25_34XX_GPIO146_UP);     //soft MISO
 
 	//Get the GPIO pins used for the panel
 	gpio_request(CS_PIN, "OLED43_CS_PIN");
@@ -257,7 +311,7 @@ static int __init oled43_panel_drv_init(void)
 
 	ret = omap_dss_register_driver(&oled43_driver);
 	if (ret != 0)
-		pr_err("lgphilips_lb035q02: Unable to register panel driver: %d\n", ret);
+		pr_err("cmel_oled43: Unable to register panel driver: %d\n", ret);
 
 	printk(KERN_INFO "cmel_oled43_panel: done\n");
 	return ret;
