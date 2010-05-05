@@ -313,8 +313,6 @@ static int __devinit tsc2007_probe(struct i2c_client *client,
 	if (pdata->init_platform_hw)
 		pdata->init_platform_hw();
 
-	//err = request_irq(ts->irq, tsc2007_irq, 0,
-	//		client->dev.driver->name, ts);
 	if (request_irq(ts->irq, tsc2007_irq, IRQF_TRIGGER_FALLING,
 			client->dev.driver->name, ts)) {
 		dev_info(&client->dev,
