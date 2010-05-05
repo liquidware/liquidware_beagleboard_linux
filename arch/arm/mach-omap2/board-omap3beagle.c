@@ -30,6 +30,8 @@
 
 #include <linux/regulator/machine.h>
 #include <linux/i2c/twl.h>
+#include <linux/i2c.h>
+#include <linux/i2c/tsc2007.h>
 
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
@@ -307,10 +309,51 @@ static struct i2c_board_info __initdata beagle_i2c_boardinfo[] = {
 	},
 };
 
+/* TouchScreen */
+#define OMAP3_BEAGLETOUCH_TS_GPIO 136
+static int tsc2007_get_pendown_state(void)
+{
+	return !gpio_get_value(OMAP3_BEAGLETOUCH_TS_GPIO);
+}
+
+static int omap3beagletouch_tsc2007_init(void)
+{
+	int gpio = OMAP3_BEAGLETOUCH_TS_GPIO;
+	int ret = 0;
+
+	ret = gpio_request(gpio, "tsc2007_pen_down");
+	if (ret < 0) {
+		printk(KERN_ERR "Failed to request GPIO %d for "
+				"tsc2007 pen down IRQ\n", gpio);
+		return ret;
+	}
+
+	gpio_direction_input(gpio);
+
+	return ret;
+}
+
+static struct tsc2007_platform_data tsc2007_info = {
+	.model			= 2007,
+	.x_plate_ohms		= 180,
+	.get_pendown_state	= tsc2007_get_pendown_state,
+	.init_platform_hw	= omap3beagletouch_tsc2007_init,
+};
+
+static struct i2c_board_info __initdata ts_i2c_clients[] = {
+	{
+		I2C_BOARD_INFO("tsc2007", 0x48),
+		.irq	= OMAP_GPIO_IRQ(OMAP3_BEAGLETOUCH_TS_GPIO),
+		.platform_data	= &tsc2007_info,
+	},
+};
+
 static int __init omap3_beagle_i2c_init(void)
 {
 	omap_register_i2c_bus(1, 2600, beagle_i2c_boardinfo,
 			ARRAY_SIZE(beagle_i2c_boardinfo));
+	omap_register_i2c_bus(2, 100, ts_i2c_clients,
+			ARRAY_SIZE(ts_i2c_clients));
 	/* Bus 3 is attached to the DVI port where devices like the pico DLP
 	 * projector don't work reliably with 400kHz */
 	omap_register_i2c_bus(3, 100, NULL, 0);
@@ -457,6 +500,13 @@ static struct omap_musb_board_data musb_board_data = {
 	.power			= 100,
 };
 
+/* Pins for the BeagleTouch OLED */
+#define CS_PIN          139
+#define MOSI_PIN        144
+#define CLK_PIN         138
+#define RESET_PIN       137
+#define PANEL_PWR_PIN   143
+
 static void __init omap3_beagle_init(void)
 {
 	omap3_mux_init(board_mux, OMAP_PACKAGE_CBB);
@@ -465,12 +515,13 @@ static void __init omap3_beagle_init(void)
 			ARRAY_SIZE(omap3_beagle_devices));
 	omap_serial_init();
 
-	//For the CMEL OLED Panel
-    omap_mux_init_gpio(139, OMAP_PIN_OUTPUT);   //CS_PIN
-    omap_mux_init_gpio(144, OMAP_PIN_OUTPUT);	//MOSI_PIN
-    omap_mux_init_gpio(138, OMAP_PIN_OUTPUT);	//CLK_PIN
-    omap_mux_init_gpio(137, OMAP_PIN_OUTPUT);	//RESET_PIN
-    omap_mux_init_gpio(143, OMAP_PIN_OUTPUT);	//PANEL_PWR_PIN
+	/* BeagleTouch OLED */
+    omap_mux_init_gpio(CS_PIN, OMAP_PIN_OUTPUT);
+    omap_mux_init_gpio(MOSI_PIN, OMAP_PIN_OUTPUT);
+    omap_mux_init_gpio(CLK_PIN, OMAP_PIN_OUTPUT);
+    omap_mux_init_gpio(RESET_PIN, OMAP_PIN_OUTPUT);
+    omap_mux_init_gpio(PANEL_PWR_PIN, OMAP_PIN_OUTPUT);
+	omap_mux_init_gpio(OMAP3_BEAGLETOUCH_TS_GPIO, OMAP_PIN_INPUT_PULLUP);
 
 	omap_mux_init_gpio(170, OMAP_PIN_INPUT);
 	gpio_request(170, "DVI_nPD");
