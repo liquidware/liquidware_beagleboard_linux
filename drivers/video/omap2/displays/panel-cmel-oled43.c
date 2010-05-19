@@ -105,6 +105,8 @@ static void oled43_writeReg(uint8_t index, uint8_t val) {
 }
 
 static int oled43_hardware_init(void) {
+uint8_t brightness;
+double percent; 
 
 	/* Panel init sequence from the panel datasheet */
 	PANEL_PWR_LOW;						// just to be sure, hold the oled power supply off
@@ -146,7 +148,7 @@ static int oled43_hardware_init(void) {
     oled43_writeReg(0x22, 0x0B);
 
     oled43_writeReg(0x23, 0x00); //B
-    oled43_writeReg(0x24, 0x05);
+    oled43_writeReg(0x24, 0x05);    
     oled43_writeReg(0x25, 0x07);
     oled43_writeReg(0x26, 0x05);
     oled43_writeReg(0x27, 0x04);
@@ -154,11 +156,24 @@ static int oled43_hardware_init(void) {
     oled43_writeReg(0x29, 0x04);
     oled43_writeReg(0x2A, 0x09);
 
-    //brightness
-    oled43_writeReg(0x3A, 0x11); //50 NITs birghtness
+    //Set the brightness
+    // 0x20 - 200 nits
+    // 0x1E - 175 nits
+    // 0x1C - 150 nits
+    // 0x17 - 100 nits
+    // 0x14 -  70 nits
+    // 0x11 -  50 nits
+
+    brightness = 0x1C;
+    percent = ((double)brightness - 0x11)/
+               (0x20 - 0x11) * 100.0;
+
+    printk(KERN_INFO "cmel_oled43_panel: Brightness at %d percent\n", (int)percent);
+    
+    oled43_writeReg(0x3A, brightness);    
 
     //display on
-    oled43_writeReg(0x06, 0x03);
+    oled43_writeReg(0x06, 0x03);   
 
 	PANEL_PWR_HIGH;
 
