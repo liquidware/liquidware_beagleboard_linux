@@ -106,7 +106,7 @@ static const struct ctrl sd_ctrls[] = {
 		.minimum = 0,
 		.maximum = 255,
 		.step    = 1,
-#define BRIGHTNESS_DEF 20
+#define BRIGHTNESS_DEF 128
 		.default_value = BRIGHTNESS_DEF,
 	},
 	.set = sd_setbrightness,
@@ -120,7 +120,7 @@ static const struct ctrl sd_ctrls[] = {
 		.minimum = 0,
 		.maximum = 255,
 		.step    = 1,
-#define CONTRAST_DEF 37
+#define CONTRAST_DEF 128
 		.default_value = CONTRAST_DEF,
 	},
 	.set = sd_setcontrast,
@@ -134,7 +134,7 @@ static const struct ctrl sd_ctrls[] = {
 	    .minimum = 0,
 	    .maximum = 63,
 	    .step    = 1,
-#define GAIN_DEF 20
+#define GAIN_DEF 30
 	    .default_value = GAIN_DEF,
 	},
 	.set = sd_setgain,
@@ -148,7 +148,7 @@ static const struct ctrl sd_ctrls[] = {
 	    .minimum = 0,
 	    .maximum = 255,
 	    .step    = 1,
-#define EXPO_DEF 120
+#define EXPO_DEF 128
 	    .default_value = EXPO_DEF,
 	},
 	.set = sd_setexposure,
@@ -204,7 +204,7 @@ static const struct ctrl sd_ctrls[] = {
 	    .minimum = 0,
 	    .maximum = 1,
 	    .step    = 1,
-#define AUTOGAIN_DEF 1
+#define AUTOGAIN_DEF 0
 	    .default_value = AUTOGAIN_DEF,
 	},
 	.set = sd_setautogain,
