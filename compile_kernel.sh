@@ -4,12 +4,14 @@
 #  Compiles the kernel and copies uImage and/or modules 
 #  to the SD card formatted for the BeagelBoard
 #
-# Syntax:
-#  ./compile_kernel.sh [action] [SD card device]
-#
-# Example:
-#  ./compile_kernel.sh image /dev/sdb #copies only the uImage to the SD card
-#
+help="
+compile_kernel.sh
+
+Syntax:
+    ./compile_kernel.sh [action] [SD card device]
+Example:
+    ./compile_kernel.sh image /dev/sdb #copies only the uImage to the SD card"
+
 
 #config parameters
 FAT_DEVICE=${2}1
